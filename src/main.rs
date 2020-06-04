@@ -1,8 +1,10 @@
 use serde::{Serialize, Deserialize};
-use bloomfilter::Bloom;
 use siphasher::sip::SipHasher;
 use std::hash::BuildHasher;
 
+
+mod bloom;
+use bloom::Bloom;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct InternalState {
@@ -31,6 +33,6 @@ fn main() {
     filter.set(&1);
     println!("{}", filter.check(&1)); /* true */
     println!("{}", filter.check(&2)); /* probably false */
-    println!("{}", serde_json::to_string(&SipHasher::new_with_keys(10,10)).unwrap());
+    println!("{}", serde_json::to_string(&filter).unwrap());
     
 }

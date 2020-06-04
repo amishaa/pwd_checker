@@ -12,34 +12,11 @@ dependencies = [
 
 [[package]]
 name = "bit-vec"
-version = "0.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02b4ff8b16e6076c3e14220b39fbc1fabb6737522281a388998046859400895f"
-
-[[package]]
-name = "bit-vec"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f0dc55f2d8a1a85650ac47858bb001b4c0dd73d79e3c455a842925e68d29cd3"
-
-[[package]]
-name = "bloom"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d00ac8e5056d6d65376a3c1aa5c7c34850d6949ace17f0266953a254eb3d6fe8"
 dependencies = [
- "bit-vec 0.4.4",
-]
-
-[[package]]
-name = "bloomfilter"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b14238e7ff7b94d429366d4eecd668fd8fe81ffac7f334720d0edbdd87408428"
-dependencies = [
- "bit-vec 0.6.2",
- "rand",
- "siphasher",
+ "serde",
 ]
 
 [[package]]
@@ -82,8 +59,8 @@ name = "pass_norm"
 version = "0.1.0"
 dependencies = [
  "bincode",
- "bloom",
- "bloomfilter",
+ "bit-vec",
+ "rand",
  "serde",
  "serde_json",
  "siphasher",
