@@ -12,3 +12,5 @@ bincode = ""
 bloom = ""
 serde = {version = "", features = ["derive"]}
 serde_json = ""
+siphasher = { version = "", features = ["serde"] }
+bloomfilter = ""
