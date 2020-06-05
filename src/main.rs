@@ -1,4 +1,5 @@
 //use serde_json;
+use rayon::prelude::*;
 use std::{fs,io::{self, BufRead, Write}};
 use bincode;
 
@@ -29,7 +30,7 @@ fn read_filter (filter_filename: &str) -> io::Result<Bloom>
     let content = fs::File::open(filter_filename)?;
     let buf_reader = io::BufReader::new(content);
 
-    Ok(bincode::deserialize_from(buf_reader).unwrap())
+    Ok(Bloom::new_for_fp_rate(expected_num_items, false_positive_rate));
 }
 
 fn fill_filter_with_pwd<'a> (pwd_filename: &str, dst_filename: &str)  -> io::Result<()>
@@ -42,7 +43,6 @@ fn fill_filter_with_pwd<'a> (pwd_filename: &str, dst_filename: &str)  -> io::Res
     fill_filter_with_strings(buf_reader.lines().map(|line| normalize_string(&line.unwrap())), &mut filter);
 
     let output = fs::File::create(dst_filename)?;
-    bincode::serialize_into(output, &filter).unwrap();
     Ok(())
 
 }
@@ -55,10 +55,8 @@ fn normalize_string (s:&str) -> String
 
 fn fill_filter_with_strings<'a, I> (strings: I, filter: &'a mut Bloom) -> &'a Bloom
 where 
-    I: Iterator<Item=String>
+    I: Iterator<Item=String>,
 {
-    for string in strings {
-        filter.set(&string);
-    }
+    strings.par_iter().for_each(|string| filter.set(&string));
     filter
 }

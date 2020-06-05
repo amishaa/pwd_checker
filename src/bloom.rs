@@ -5,7 +5,6 @@
 //! This is a simple but fast Bloom filter implementation, that requires only
 //! 2 hash functions, generated with SipHash-1-3 using randomized keys.
 //!
-#[allow(unused)]
 
 extern crate bit_vec;
 extern crate rand;
@@ -22,10 +21,23 @@ use std::hash::{Hash, Hasher};
 #[cfg(test)]
 use rand::Rng;
 
+trait BloomHolder {
+    fn get (&self, index: usize) -> bool;
+    fn capacity (&self) -> usize;
+}
+
+trait BloomHolderMut : BloomHolder {
+    fn set (&mut self, index: u64, value);
+}
+
+impl BloomHolder for bit_vec;
+
 /// Bloom filter structure
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct Bloom {
-    bitmap: BitVec,
+pub struct <'a, T> Bloom
+where
+    T: BloomHolder
+{
+    bitmap: T,
     bitmap_bits: u64,
     k_num: u32,
     sips: [SipHasher13; 2],
