@@ -27,7 +27,7 @@ trait BloomHolder {
 }
 
 trait BloomHolderMut : BloomHolder {
-    fn set (&mut self, index: u64, value);
+    fn set (&mut self, index: u64, value: bool);
 }
 
 impl BloomHolder for bit_vec;
