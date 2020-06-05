@@ -16,13 +16,17 @@ use siphasher::sip::SipHasher13;
 use std::cmp;
 use std::f64;
 use std::hash::{Hash, Hasher};
+use std::io::{self, Seek, SeekFrom, Read};
+use std::fs::File;
 
 #[cfg(test)]
 use rand::Rng;
 
 pub trait BloomHolder {
-    fn get (&self, index: usize) -> Option<bool>;
-    fn capacity (&self) -> usize;
+    // get index-th bite
+    fn get (&mut self, index: usize) -> Option<bool>;
+    // size in bites, not bytes
+    fn len (&self) -> usize;
 }
 
 
@@ -34,14 +38,14 @@ pub trait BloomHolderMut : BloomHolder {
 
 
 impl BloomHolder for BitVec {
-    fn get(&self, index: usize) -> Option<bool>
+    fn get(&mut self, index: usize) -> Option<bool>
     {
         self.get(index)
     }
 
-    fn capacity (&self) -> usize
+    fn len (&self) -> usize
     {
-        self.capacity()
+        self.len()
     }
 }
 
@@ -62,6 +66,25 @@ impl BloomHolderMut for BitVec {
         self.clear()
     }
 
+}
+
+impl BloomHolder for File {
+    fn get (&mut self, index: usize) -> Option<bool>
+    {
+        if index > self.len() {
+            return None;
+        }
+        let w = index/8;
+        let b = index%8;
+        let mut buf = [0u8;1];
+        self.seek(SeekFrom::Start(w as u64)).unwrap();
+        self.read(&mut buf).unwrap();
+        Some(buf[0] & (1<<b) != 0)
+    }
+    fn len (&self) -> usize
+    {
+        (self.metadata().unwrap().len()*8) as usize
+    }
 }
 
 /// Bloom filter structure
@@ -97,23 +120,25 @@ where
         }
     }
 
+    pub fn from_bitmap_count(bitmap: H, item_count: usize) -> Self
+    {
+        let bitmap_bits: usize = bitmap.len();
+        let k_num = Self::optimal_k_num(bitmap_bits, item_count);
+        let sips = Self::sips_new();
+        Self {
+            bitmap,
+            bitmap_bits,
+            k_num,
+            sips,
+        }
+    }
+
     /// Create a new bloom filter structure.
     /// items_count is an estimation of the maximum number of items to store.
     /// fp_p is the wanted rate of false positives, in ]0.0, 1.0[
     pub fn new_for_fp_rate(items_count: usize, fp_p: f64) -> Self {
         let bitmap_size = Self::compute_bitmap_size(items_count, fp_p);
         Bloom::new(bitmap_size, items_count)
-    }
-
-    /// Compute a recommended bitmap size for items_count items
-    /// and a fp_p rate of false positives.
-    /// fp_p obviously has to be within the ]0.0, 1.0[ range.
-    pub fn compute_bitmap_size(items_count: usize, fp_p: f64) -> usize {
-        assert!(items_count > 0);
-        assert!(fp_p > 0.0 && fp_p < 1.0);
-        let log2 = f64::consts::LN_2;
-        let log2_2 = log2 * log2;
-        ((items_count as f64) * f64::ln(fp_p) / (-8.0 * log2_2)).ceil() as usize
     }
 
     /// Record the presence of an item.
@@ -180,7 +205,7 @@ where
 
     /// Check if an item is present in the set.
     /// There can be false positives, but no false negatives.
-    pub fn check<T>(&self, item: &T) -> bool
+    pub fn check<T>(&mut self, item: &T) -> bool
     where
         T: Hash + ?Sized,
     {
@@ -195,8 +220,8 @@ where
     }
 
     /// Return the bitmap as a vector of bytes
-    pub fn bitmap(&self) -> &H {
-        &self.bitmap
+    pub fn bitmap(self) -> H {
+        self.bitmap
     }
 
     /// Return the number of bits in the filter
@@ -214,12 +239,24 @@ where
         [self.sips[0].keys(), self.sips[1].keys()]
     }
 
-    fn optimal_k_num(bitmap_bits: usize, items_count: usize) -> u32 {
+    pub fn optimal_k_num(bitmap_bits: usize, items_count: usize) -> u32 {
         let m = bitmap_bits as f64;
         let n = items_count as f64;
         let k_num = (m / n * f64::ln(2.0f64)).ceil() as u32;
         cmp::max(k_num, 1)
     }
+
+    /// Compute a recommended bitmap size for items_count items
+    /// and a fp_p rate of false positives.
+    /// fp_p obviously has to be within the ]0.0, 1.0[ range.
+    pub fn compute_bitmap_size(items_count: usize, fp_p: f64) -> usize {
+        assert!(items_count > 0);
+        assert!(fp_p > 0.0 && fp_p < 1.0);
+        let log2 = f64::consts::LN_2;
+        let log2_2 = log2 * log2;
+        ((items_count as f64) * f64::ln(fp_p) / (-8.0 * log2_2)).ceil() as usize
+    }
+
 
     fn bloom_hash<T>(&self, hashes: &mut [u64; 2], item: &T, k_i: u32) -> usize
     where
@@ -237,7 +274,7 @@ where
     }
 
 
-    fn sips_new() -> [SipHasher13; 2] {
+    pub fn sips_new() -> [SipHasher13; 2] {
         [SipHasher13::new_with_keys(0, 1), SipHasher13::new_with_keys(1, 0)]
     }
 }

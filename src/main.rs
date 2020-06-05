@@ -7,20 +7,20 @@ use bloom::{BloomHolder, BloomHolderMut, Bloom};
 
 type BloomBitVec = bloom::Bloom<BitVec>;
 
-static expected_num_items: usize = 600_000_000;
-static false_positive_rate: f64 = 0.07;
+static EXPECTED_NUM_ITEMS: usize = 600_000_000;
+static FALSE_POSITIVE_RATE: f64 = 0.07;
 
 fn main() {
     fill_filter_with_pwd ("Test", "dst").unwrap();
-    let filter = read_filter("dst").unwrap();
+    let mut filter = read_filter("dst").unwrap();
     println!("Enter passwords to check");
     for line in io::stdin().lock().lines(){
-        println!("{}\n", check_pwd(&line.unwrap(), &filter));
+        println!("{}\n", check_pwd(&line.unwrap(), &mut filter));
     }
     
 }
 
-fn check_pwd <T> (pwd: &str, filter: &Bloom <T>) -> bool
+fn check_pwd <T> (pwd: &str, filter: &mut Bloom <T>) -> bool
 where
     T: BloomHolder
 {
@@ -33,7 +33,7 @@ fn read_filter (filter_filename: &str) -> io::Result<Bloom<BitVec>>
     let content = fs::File::open(filter_filename)?;
     let buf_reader = io::BufReader::new(content);
 
-    Ok(BloomBitVec::new_for_fp_rate(expected_num_items, false_positive_rate))
+    Ok(BloomBitVec::new_for_fp_rate(EXPECTED_NUM_ITEMS, FALSE_POSITIVE_RATE))
 }
 
 fn fill_filter_with_pwd (pwd_filename: &str, dst_filename: &str)  -> io::Result<()>
@@ -41,7 +41,7 @@ fn fill_filter_with_pwd (pwd_filename: &str, dst_filename: &str)  -> io::Result<
     let content = fs::File::open(pwd_filename)?;
     let buf_reader = io::BufReader::new(content);
 
-    let mut filter = BloomBitVec::new_for_fp_rate(expected_num_items, false_positive_rate);
+    let mut filter = BloomBitVec::new_for_fp_rate(EXPECTED_NUM_ITEMS, FALSE_POSITIVE_RATE);
 
     fill_filter_with_strings(buf_reader.lines().map(|line| normalize_string(&line.unwrap())), &mut filter);
 
