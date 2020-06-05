@@ -1,33 +1,49 @@
-use serde::{Serialize, Deserialize};
-use serde_json;
-use std::{fs,io::{self, BufRead}};
+//use serde_json;
+use std::{fs,io::{self, BufRead, Write}};
+use bincode;
 
 mod bloom;
 use bloom::Bloom;
 
+static expected_num_items: usize = 600_000_000;
+static false_positive_rate: f64 = 0.07;
+
 fn main() {
-    // The object that we will serialize.
-
-    let expected_num_items = 600_000_000;
-
-    // out of 100 items that are not inserted, expect 1 to return true for contain
-    let false_positive_rate = 0.07;
-
-
-    let mut filter = Bloom::new_for_fp_rate(expected_num_items, false_positive_rate);
-    filter.set(&1);
-
-    fill_filter_with_pwd ("Test", & mut filter).unwrap();
-//    println!("{}", serde_json::to_string(&filter).unwrap());
+    fill_filter_with_pwd ("Test", "dst").unwrap();
+    let filter : Bloom = read_filter("dst").unwrap();
+    println!("Enter passwords to check");
+    for line in io::stdin().lock().lines(){
+        println!("{}\n", check_pwd(&line.unwrap(), &filter));
+    }
     
 }
 
-fn fill_filter_with_pwd<'a> (filename: &str,  filter: &'a mut Bloom) -> io::Result<&'a Bloom>
+fn check_pwd (pwd: &str, filter: &Bloom) -> bool
 {
-    let contents = fs::File::open(filename)?;
-    let buf_reader = io::BufReader::new(contents);
+    filter.check(&normalize_string(pwd))
+}
 
-    Ok(fill_filter_with_strings(buf_reader.lines().map(|line| normalize_string(&line.unwrap())), filter))
+
+fn read_filter (filter_filename: &str) -> io::Result<Bloom>
+{
+    let content = fs::File::open(filter_filename)?;
+    let buf_reader = io::BufReader::new(content);
+
+    Ok(bincode::deserialize_from(buf_reader).unwrap())
+}
+
+fn fill_filter_with_pwd<'a> (pwd_filename: &str, dst_filename: &str)  -> io::Result<()>
+{
+    let content = fs::File::open(pwd_filename)?;
+    let buf_reader = io::BufReader::new(content);
+
+    let mut filter = Bloom::new_for_fp_rate(expected_num_items, false_positive_rate);
+
+    fill_filter_with_strings(buf_reader.lines().map(|line| normalize_string(&line.unwrap())), &mut filter);
+
+    let output = fs::File::create(dst_filename)?;
+    bincode::serialize_into(output, &filter).unwrap();
+    Ok(())
 
 }
 
