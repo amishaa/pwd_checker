@@ -7,11 +7,11 @@ use bloom::{BloomHolder, BloomHolderMut, Bloom};
 
 type BloomBitVec = bloom::Bloom<BitVec>;
 
-static EXPECTED_NUM_ITEMS: usize = 1_000_000;// 600_000_000;
+static EXPECTED_NUM_ITEMS: usize = 600_000_000;
 static FALSE_POSITIVE_RATE: f64 = 0.07;
 
 fn main() {
-//    fill_filter_with_pwd ("Test", "dst").unwrap();
+    fill_filter_with_pwd ("Test", "dst").unwrap();
     let mut filter = read_filter("dst").unwrap();
     println!("Enter passwords to check");
     for line in io::stdin().lock().lines(){
@@ -28,24 +28,12 @@ where
 }
 
 
-fn read_filter (filter_filename: &str) -> io::Result<BloomBitVec>
+fn read_filter (filter_filename: &str) -> io::Result<Bloom<fs::File>>
 {
-    let mut content =  BitVec::from_bytes(&fs::read(filter_filename)?);
-    let mut content2 = fs::File::open(filter_filename)?;
+    let content = fs::File::open(filter_filename)?;
 
-    for i in 0..10 {
-        println!("{:?} {:?}", BloomHolder::get(&mut content2, i), BloomHolder::get(&mut content, i));
-    }
-
-    Ok(BloomBitVec::from_bitmap_count(content, EXPECTED_NUM_ITEMS))
+    Ok(Bloom::<fs::File>::from_bitmap_count(content, EXPECTED_NUM_ITEMS))
 }
-
-//fn read_filter (filter_filename: &str) -> io::Result<Bloom<fs::File>>
-//{
-//    let content = fs::File::open(filter_filename)?;
-
-//    Ok(Bloom::<fs::File>::from_bitmap_count(content, EXPECTED_NUM_ITEMS))
-//}
 
 fn fill_filter_with_pwd (pwd_filename: &str, dst_filename: &str)  -> io::Result<()>
 {

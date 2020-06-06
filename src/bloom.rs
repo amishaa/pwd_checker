@@ -78,7 +78,6 @@ impl BloomHolder for File {
         let mut buf = [0u8;1];
         self.seek(SeekFrom::Start(w as u64)).unwrap();
         self.read(&mut buf).unwrap();
-        println!("{:?}",buf);
         Some(buf[0] & (1<<(7-b)) != 0)
     }
     fn len (&self) -> usize
