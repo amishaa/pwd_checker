@@ -11,7 +11,6 @@ extern crate siphasher;
 extern crate serde;
 
 use bit_vec::BitVec;
-use rand::prelude::*;
 use siphasher::sip::SipHasher13;
 use std::cmp;
 use std::f64;
@@ -40,12 +39,12 @@ pub trait BloomHolderMut : BloomHolder {
 impl BloomHolder for BitVec {
     fn get(&mut self, index: usize) -> Option<bool>
     {
-        self.get(index)
+        BitVec::get(&self, index)
     }
 
     fn len (&self) -> usize
     {
-        self.len()
+        BitVec::len(&self)
     }
 }
 
@@ -53,7 +52,7 @@ impl BloomHolder for BitVec {
 impl BloomHolderMut for BitVec {
     fn set(&mut self, index: usize, value: bool)
     {
-        self.set(index, value);
+        BitVec::set(self, index, value);
     }
 
     fn zeros(size: usize) -> Self
@@ -79,7 +78,8 @@ impl BloomHolder for File {
         let mut buf = [0u8;1];
         self.seek(SeekFrom::Start(w as u64)).unwrap();
         self.read(&mut buf).unwrap();
-        Some(buf[0] & (1<<b) != 0)
+        println!("{:?}",buf);
+        Some(buf[0] & (1<<(7-b)) != 0)
     }
     fn len (&self) -> usize
     {
@@ -88,6 +88,7 @@ impl BloomHolder for File {
 }
 
 /// Bloom filter structure
+#[derive(Clone)]
 pub struct Bloom<T>
 where
     T: BloomHolder
@@ -120,18 +121,6 @@ where
         }
     }
 
-    pub fn from_bitmap_count(bitmap: H, item_count: usize) -> Self
-    {
-        let bitmap_bits: usize = bitmap.len();
-        let k_num = Self::optimal_k_num(bitmap_bits, item_count);
-        let sips = Self::sips_new();
-        Self {
-            bitmap,
-            bitmap_bits,
-            k_num,
-            sips,
-        }
-    }
 
     /// Create a new bloom filter structure.
     /// items_count is an estimation of the maximum number of items to store.
@@ -181,6 +170,18 @@ impl<H> Bloom<H>
 where
     H: BloomHolder
 {
+    pub fn from_bitmap_count(bitmap: H, item_count: usize) -> Self
+    {
+        let bitmap_bits: usize = bitmap.len();
+        let k_num = Self::optimal_k_num(bitmap_bits, item_count);
+        let sips = Self::sips_new();
+        Self {
+            bitmap,
+            bitmap_bits,
+            k_num,
+            sips,
+        }
+    }
     /// Create a bloom filter structure with an existing state.
     /// The state is assumed to be retrieved from an existing bloom filter.
     pub fn from_existing(
