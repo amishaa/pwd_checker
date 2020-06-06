@@ -1,5 +1,5 @@
 //use serde_json;
-use std::{fs, io::{self, BufRead, Write}};
+use std::{fs, io::{self, BufRead}};
 use bit_vec::BitVec;
 
 mod bloom;

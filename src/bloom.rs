@@ -15,7 +15,7 @@ use siphasher::sip::SipHasher13;
 use std::cmp;
 use std::f64;
 use std::hash::{Hash, Hasher};
-use std::io::{self, Seek, SeekFrom, Read};
+use std::io::{Seek, SeekFrom, Read};
 use std::fs::File;
 
 #[cfg(test)]
@@ -32,7 +32,6 @@ pub trait BloomHolder {
 pub trait BloomHolderMut : BloomHolder {
     fn set (&mut self, index: usize, value: bool);
     fn zeros(size: usize) -> Self;
-    fn clear(&mut self);
 }
 
 
@@ -58,11 +57,6 @@ impl BloomHolderMut for BitVec {
     fn zeros(size: usize) -> Self
     {
         BitVec::from_elem(size, false)
-    }
-
-    fn clear(&mut self)
-    {
-        self.clear()
     }
 
 }
@@ -141,28 +135,6 @@ where
         }
     }
 
-    /// Record the presence of an item in the set,
-    /// and return the previous state of this item.
-    pub fn check_and_set<T>(&mut self, item: &T) -> bool
-    where
-        T: Hash + ?Sized,
-    {
-        let mut hashes = [0u64, 0u64];
-        let mut found = true;
-        for k_i in 0..self.k_num {
-            let bit_offset = (self.bloom_hash(&mut hashes, &item, k_i) % self.bitmap_bits) as usize;
-            if self.bitmap.get(bit_offset).unwrap() == false {
-                found = false;
-                self.bitmap.set(bit_offset, true);
-            }
-        }
-        found
-    }
-
-    /// Clear all of the bits in the filter, removing all keys from the set
-    pub fn clear(&mut self) {
-        self.bitmap.clear()
-    }
 }
 
 impl<H> Bloom<H>
@@ -181,27 +153,6 @@ where
             sips,
         }
     }
-    /// Create a bloom filter structure with an existing state.
-    /// The state is assumed to be retrieved from an existing bloom filter.
-    pub fn from_existing(
-        bitmap: H,
-        bitmap_bits: usize,
-        k_num: u32,
-        sip_keys: [(u64, u64); 2],
-    ) -> Self {
-        let sips = [
-            SipHasher13::new_with_keys(sip_keys[0].0, sip_keys[0].1),
-            SipHasher13::new_with_keys(sip_keys[1].0, sip_keys[1].1),
-        ];
-        Self {
-            bitmap: bitmap,
-            bitmap_bits,
-            k_num,
-            sips,
-        }
-    }
-
-
 
     /// Check if an item is present in the set.
     /// There can be false positives, but no false negatives.
@@ -222,21 +173,6 @@ where
     /// Return the bitmap as a vector of bytes
     pub fn bitmap(self) -> H {
         self.bitmap
-    }
-
-    /// Return the number of bits in the filter
-    pub fn number_of_bits(&self) -> usize {
-        self.bitmap_bits
-    }
-
-    /// Return the number of hash functions used for `check` and `set`
-    pub fn number_of_hash_functions(&self) -> u32 {
-        self.k_num
-    }
-
-    /// Return the keys used by the sip hasher
-    pub fn sip_keys(&self) -> [(u64, u64); 2] {
-        [self.sips[0].keys(), self.sips[1].keys()]
     }
 
     pub fn optimal_k_num(bitmap_bits: usize, items_count: usize) -> u32 {
