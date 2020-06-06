@@ -45,8 +45,6 @@ fn fill_filter_with_pwd (pwd_filename: &str, dst_filename: &str)  -> io::Result<
     fill_filter_with_strings(buf_reader.lines().map(|line| normalize_string(&line.unwrap())), &mut filter);
 
     let bitmap = filter.bitmap().to_bytes();
-    println!("{:?}", &bitmap[..10]);
-
     fs::write(dst_filename, bitmap)?;
     Ok(())
 
