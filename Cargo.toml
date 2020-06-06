@@ -14,3 +14,4 @@ serde_json = ""
 siphasher = { version = "", features = ["serde"] }
 bit-vec = {version = "", features = ["serde"]}
 rand = ""
+structopt = ""
