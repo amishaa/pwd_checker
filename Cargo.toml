@@ -1,5 +1,5 @@
 [package]
-name = "pass_norm"
+name = "pwd_checker"
 version = "0.1.0"
 authors = ["amishaa"]
 edition = "2018"

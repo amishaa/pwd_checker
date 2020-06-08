@@ -17,20 +17,22 @@ use std::f64;
 use std::hash::{Hash, Hasher};
 use std::io::{Seek, SeekFrom, Read};
 use std::fs::File;
+use std::vec::Vec;
 
 #[cfg(test)]
 use rand::Rng;
 
 pub trait BloomHolder {
-    // get index-th bite
+    // get index-th bit
     fn get (&mut self, index: usize) -> Option<bool>;
-    // size in bites, not bytes
+    // size in bits, not bytes
     fn len (&self) -> usize;
 }
 
 
 pub trait BloomHolderMut : BloomHolder {
-    fn set (&mut self, index: usize, value: bool);
+    fn set_true (&mut self, index: usize);
+    // size in bits, not bytes
     fn zeros(size: usize) -> Self;
 }
 
@@ -49,9 +51,9 @@ impl BloomHolder for BitVec {
 
 
 impl BloomHolderMut for BitVec {
-    fn set(&mut self, index: usize, value: bool)
+    fn set_true(&mut self, index: usize)
     {
-        BitVec::set(self, index, value);
+        BitVec::set(self, index, true);
     }
 
     fn zeros(size: usize) -> Self
@@ -61,18 +63,47 @@ impl BloomHolderMut for BitVec {
 
 }
 
+fn get_block_offset (index: usize) -> (usize, usize){
+    (index/8, 7-(index%8))
+}
+
+impl BloomHolder for Vec<u8> {
+    fn get (&mut self, index: usize) -> Option<bool>
+    {
+        let (w, b) = get_block_offset(index);
+        <[u8]>::get(&self, w).map(|&val| val & (1 << b) != 0)
+    }
+    fn len(&self) -> usize
+    {
+        Vec::<u8>::len(&self)*8
+    }
+}
+
+impl BloomHolderMut for Vec<u8> {
+    fn set_true (&mut self, index: usize)
+    {
+        let (w, b) = get_block_offset(index);
+        let val = self[w] | 1 << b;
+        self[w] = val;
+    }
+    fn zeros(size: usize) -> Self
+    {
+        assert!(size%8 == 0);
+        vec![0; size/8]
+    }
+}
+
 impl BloomHolder for File {
     fn get (&mut self, index: usize) -> Option<bool>
     {
         if index > self.len() {
             return None;
         }
-        let w = index/8;
-        let b = index%8;
+        let (w,b) = get_block_offset(index);
         let mut buf = [0u8;1];
         self.seek(SeekFrom::Start(w as u64)).unwrap();
         self.read(&mut buf).unwrap();
-        Some(buf[0] & (1<<(7-b)) != 0)
+        Some(buf[0] & (1<<b) != 0)
     }
     fn len (&self) -> usize
     {
@@ -131,7 +162,7 @@ where
         let mut hashes = [0u64, 0u64];
         for k_i in 0..self.k_num {
             let bit_offset = (self.bloom_hash(&mut hashes, &item, k_i) % self.bitmap_bits) as usize;
-            self.bitmap.set(bit_offset, true);
+            self.bitmap.set_true(bit_offset);
         }
     }
 
