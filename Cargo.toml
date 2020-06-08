@@ -8,10 +8,5 @@ edition = "2018"
 
 [dependencies]
 
-bincode = ""
-serde = {version = "", features = ["derive"]}
-serde_json = ""
 siphasher = { version = "", features = ["serde"] }
-bit-vec = {version = "", features = ["serde"]}
-rand = ""
 structopt = ""
