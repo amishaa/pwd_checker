@@ -1,12 +1,11 @@
 use std::{fs, io::{self, BufRead}, path::PathBuf};
-use bit_vec::BitVec;
 use structopt::StructOpt;
 
 
 mod bloom;
-use bloom::{BloomHolder, BloomHolderMut, Bloom};
+use bloom::{BloomHolder, Bloom};
 
-type BloomBitVec = bloom::Bloom<BitVec>;
+type BloomBitVec = bloom::Bloom<Vec<u8>>;
 
 #[derive(StructOpt, Debug)]
 enum PasswordChecker {
@@ -59,7 +58,7 @@ fn main() -> io::Result<()> {
 
 fn check_pwd_filter (filter_path: &PathBuf, opt: &Opt) -> io::Result<()> {
     let mut filter = read_filter(filter_path, opt)?;
-    println!("Enter passwords to check");
+    println!("Enter passwords to check (ctr+D to exit)");
     for line in io::stdin().lock().lines(){
         println!("{}\n", check_pwd(&line.unwrap(), &mut filter));
     }
@@ -91,7 +90,7 @@ fn fill_filter_with_pwd (pwd_filename: &PathBuf, dst_filename: &PathBuf, opt: &O
 
     buf_reader.lines().for_each(|line| filter.set(&normalize_string(&line.unwrap())));
 
-    let bitmap = filter.bitmap().to_bytes();
+    let bitmap = filter.bitmap();
     fs::write(dst_filename, bitmap)?;
     Ok(())
 
