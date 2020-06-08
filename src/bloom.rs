@@ -14,71 +14,94 @@ use std::f64;
 use std::hash::{Hash, Hasher};
 use std::io::{Seek, SeekFrom, Read};
 use std::fs::File;
-use std::vec::Vec;
 
 #[cfg(test)]
 use rand::Rng;
 
+pub struct ExtFile {
+    f: File,
+    offset: u64,
+}
+
+impl ExtFile {
+    fn read (&mut self, w: usize) -> u8 {
+        let mut buf = [0u8;1];
+        self.f.seek(SeekFrom::Start(w as u64 + self.offset)).unwrap();
+        self.f.read(&mut buf).unwrap();
+        buf[0]
+    }
+
+    fn len(&self) -> u64 
+    {
+         (self.f.metadata().unwrap().len() - self.offset)*8
+    }
+
+    pub fn from_file (mut f:File) -> Self {
+        f.seek(SeekFrom::Start(0)).unwrap();
+        let mut buf = [0u8; 8];
+        f.read_exact(&mut buf).unwrap();
+        ExtFile{f, offset:u64::from_be_bytes(buf)}
+    }
+}
+
 pub trait BloomHolder {
     // get index-th bit
-    fn get (&mut self, index: usize) -> Option<bool>;
+    fn get (&mut self, index: u64) -> Option<bool>;
     // size in bits, not bytes
-    fn len (&self) -> usize;
+    fn len (&self) -> u64;
 }
 
 
 pub trait BloomHolderMut : BloomHolder {
-    fn set_true (&mut self, index: usize);
+    fn set_true (&mut self, index: u64);
     // size in bits, not bytes
-    fn zeros(size: usize) -> Self;
+    fn zeros(size: u64) -> Self;
 }
 
 
-fn get_block_offset (index: usize) -> (usize, usize){
-    (index/8, 7-(index%8))
+fn get_block_offset (index: u64) -> (usize, usize){
+    ((index/8) as usize, (7-(index%8)) as usize)
 }
 
 impl BloomHolder for Vec<u8> {
-    fn get (&mut self, index: usize) -> Option<bool>
+    fn get (&mut self, index: u64) -> Option<bool>
     {
         let (w, b) = get_block_offset(index);
-        <[u8]>::get(&self, w).map(|&val| val & (1 << b) != 0)
+        <[u8]>::get(&self, w as usize).map(|&val| val & (1 << b) != 0)
     }
-    fn len(&self) -> usize
+    fn len(&self) -> u64
     {
-        Vec::<u8>::len(&self)*8
+        (Vec::<u8>::len(&self)*8) as u64
     }
 }
 
 impl BloomHolderMut for Vec<u8> {
-    fn set_true (&mut self, index: usize)
+    fn set_true (&mut self, index: u64)
     {
         let (w, b) = get_block_offset(index);
         let val = self[w] | 1 << b;
         self[w] = val;
     }
-    fn zeros(size: usize) -> Self
+    fn zeros(size: u64) -> Self
     {
         assert!(size%8 == 0);
-        vec![0; size/8]
+        vec![0; (size/8) as usize]
     }
 }
 
-impl BloomHolder for File {
-    fn get (&mut self, index: usize) -> Option<bool>
+impl BloomHolder for ExtFile {
+    fn get (&mut self, index: u64) -> Option<bool>
     {
         if index > self.len() {
             return None;
         }
         let (w,b) = get_block_offset(index);
-        let mut buf = [0u8;1];
-        self.seek(SeekFrom::Start(w as u64)).unwrap();
-        self.read(&mut buf).unwrap();
-        Some(buf[0] & (1<<b) != 0)
+        let val = self.read(w);
+        Some(val & (1<<b) != 0)
     }
-    fn len (&self) -> usize
+    fn len (&self) -> u64
     {
-        (self.metadata().unwrap().len()*8) as usize
+        ExtFile::len(&self)
     }
 }
 
@@ -89,8 +112,8 @@ where
     T: BloomHolder
 {
     bitmap: T,
-    bitmap_bits: usize,
-    k_num: u32,
+    bitmap_bits: u64,
+    k_num: u64,
     sips: [SipHasher13; 2],
 }
 
@@ -101,12 +124,12 @@ where
     /// Create a new bloom filter structure.
     /// bitmap_size is the size in bytes (not bits) that will be allocated in memory
     /// items_count is an estimation of the maximum number of items to store.
-    pub fn new(bitmap_size: usize, items_count: usize) -> Self
+    pub fn new(bitmap_size: u64, items_count: u64) -> Self
     {
         assert!(bitmap_size > 0 && items_count > 0);
-        let bitmap_bits: usize = (bitmap_size) * 8;
+        let bitmap_bits: u64 = (bitmap_size) * 8;
         let k_num = Self::optimal_k_num(bitmap_bits, items_count);
-        let bitmap = H::zeros(bitmap_bits as usize); // from_elem(bitmap_bits as usize, false);
+        let bitmap = H::zeros(bitmap_bits as u64);
         let sips = Self::sips_new(); // [Self::sip_new(), Self::sip_new()];
         Self {
             bitmap,
@@ -120,7 +143,7 @@ where
     /// Create a new bloom filter structure.
     /// items_count is an estimation of the maximum number of items to store.
     /// fp_p is the wanted rate of false positives, in ]0.0, 1.0[
-    pub fn new_for_fp_rate(items_count: usize, fp_p: f64) -> Self {
+    pub fn new_for_fp_rate(items_count: u64, fp_p: f64) -> Self {
         let bitmap_size = Self::compute_bitmap_size(items_count, fp_p);
         Bloom::new(bitmap_size, items_count)
     }
@@ -132,7 +155,7 @@ where
     {
         let mut hashes = [0u64, 0u64];
         for k_i in 0..self.k_num {
-            let bit_offset = (self.bloom_hash(&mut hashes, &item, k_i) % self.bitmap_bits) as usize;
+            let bit_offset = (self.bloom_hash(&mut hashes, &item, k_i) % self.bitmap_bits) as u64;
             self.bitmap.set_true(bit_offset);
         }
     }
@@ -143,9 +166,9 @@ impl<H> Bloom<H>
 where
     H: BloomHolder
 {
-    pub fn from_bitmap_count(bitmap: H, item_count: usize) -> Self
+    pub fn from_bitmap_count(bitmap: H, item_count: u64) -> Self
     {
-        let bitmap_bits: usize = bitmap.len();
+        let bitmap_bits: u64 = bitmap.len();
         let k_num = Self::optimal_k_num(bitmap_bits, item_count);
         let sips = Self::sips_new();
         Self {
@@ -156,6 +179,17 @@ where
         }
     }
 
+
+    pub fn from_bitmap_k_num (bitmap: H, k_num: u64) -> Self
+    {
+        let bitmap_bits = bitmap.len();
+        Self {
+            bitmap,
+            bitmap_bits,
+            k_num,
+            sips: Self::sips_new(),
+        }
+    }
     /// Check if an item is present in the set.
     /// There can be false positives, but no false negatives.
     pub fn check<T>(&mut self, item: &T) -> bool
@@ -164,7 +198,7 @@ where
     {
         let mut hashes = [0u64, 0u64];
         for k_i in 0..self.k_num {
-            let bit_offset = (self.bloom_hash(&mut hashes, &item, k_i) % self.bitmap_bits) as usize;
+            let bit_offset = (self.bloom_hash(&mut hashes, &item, k_i) % self.bitmap_bits) as u64;
             if self.bitmap.get(bit_offset).unwrap() == false {
                 return false;
             }
@@ -173,30 +207,30 @@ where
     }
 
     /// Return the bitmap as a vector of bytes
-    pub fn bitmap(self) -> H {
-        self.bitmap
+    pub fn bitmap_k_num(self) -> (H, u64) {
+        (self.bitmap, self.k_num)
     }
 
-    pub fn optimal_k_num(bitmap_bits: usize, items_count: usize) -> u32 {
+    pub fn optimal_k_num(bitmap_bits: u64, items_count: u64) -> u64 {
         let m = bitmap_bits as f64;
         let n = items_count as f64;
-        let k_num = (m / n * f64::ln(2.0f64)).ceil() as u32;
+        let k_num = (m / n * f64::ln(2.0f64)).ceil() as u64;
         cmp::max(k_num, 1)
     }
 
     /// Compute a recommended bitmap size for items_count items
     /// and a fp_p rate of false positives.
     /// fp_p obviously has to be within the ]0.0, 1.0[ range.
-    pub fn compute_bitmap_size(items_count: usize, fp_p: f64) -> usize {
+    pub fn compute_bitmap_size(items_count: u64, fp_p: f64) -> u64 {
         assert!(items_count > 0);
         assert!(fp_p > 0.0 && fp_p < 1.0);
         let log2 = f64::consts::LN_2;
         let log2_2 = log2 * log2;
-        ((items_count as f64) * f64::ln(fp_p) / (-8.0 * log2_2)).ceil() as usize
+        ((items_count as f64) * f64::ln(fp_p) / (-8.0 * log2_2)).ceil() as u64
     }
 
 
-    fn bloom_hash<T>(&self, hashes: &mut [u64; 2], item: &T, k_i: u32) -> usize
+    fn bloom_hash<T>(&self, hashes: &mut [u64; 2], item: &T, k_i: u64) -> u64
     where
         T: Hash + ?Sized,
     {
@@ -205,9 +239,9 @@ where
             item.hash(sip);
             let hash = sip.finish();
             hashes[k_i as usize] = hash;
-            hash as usize
+            hash as u64
         } else {
-            hashes[0].wrapping_add((k_i as u64).wrapping_mul(hashes[1]) % 0xffffffffffffffc5) as usize
+            hashes[0].wrapping_add((k_i as u64).wrapping_mul(hashes[1]) % 0xffffffffffffffc5) as u64
         }
     }
 

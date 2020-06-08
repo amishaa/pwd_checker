@@ -4,6 +4,7 @@ use structopt::StructOpt;
 
 mod bloom;
 use bloom::{BloomHolder, Bloom};
+use bloom::ExtFile;
 
 type BloomBitVec = bloom::Bloom<Vec<u8>>;
 
@@ -36,7 +37,7 @@ enum PasswordChecker {
 struct Opt {
     /// Set expected_num_items
     #[structopt(short, long, env = "PASSWORD_LIST_SIZE", default_value = "600000000")]
-    expected_num_items: usize,
+    expected_num_items: u64,
 
     /// Set desired false positive rate
     #[structopt(short, long, env = "FALSE_POSITIVE_RATE", default_value = "0.07")]
@@ -75,11 +76,11 @@ where
 }
 
 
-fn read_filter (filter_filename: &PathBuf, opt: &Opt) -> io::Result<Bloom<fs::File>>
+fn read_filter (filter_filename: &PathBuf, opt: &Opt) -> io::Result<Bloom<ExtFile>>
 {
     let content = fs::File::open(filter_filename)?;
 
-    Ok(Bloom::<fs::File>::from_bitmap_count(content, opt.expected_num_items))
+    Ok(Bloom::<ExtFile>::from_bitmap_count(ExtFile::from_file(content), opt.expected_num_items))
 }
 
 fn fill_filter_with_pwd (pwd_filename: &PathBuf, dst_filename: &PathBuf, opt: &Opt)  -> io::Result<()>
@@ -94,7 +95,7 @@ fn fill_filter_with_pwd (pwd_filename: &PathBuf, dst_filename: &PathBuf, opt: &O
         filter.set(&normalize_string(&line?));
     }
 
-    let bitmap = filter.bitmap();
+    let (bitmap, _) = filter.bitmap_k_num();
     fs::write(dst_filename, bitmap)?;
     Ok(())
 
