@@ -13,7 +13,7 @@ type BloomBitVec = bloom::Bloom<Vec<u8>>;
 #[structopt(no_version)]
 /// Check if password present or not in the list using pre-processed bloom filter.
 enum Opt {
-    /// Create a new bloom filter with desired parameters and fill with passwords from input file
+    /// Create a new bloom filter with desired parameters and fill it with passwords from stdin
     ///
     /// We normalize passwords before putting them into the filter
     Create {
@@ -25,10 +25,6 @@ enum Opt {
         /// Set desired false positive rate
         #[structopt(short, long, env = "FALSE_POSITIVE_RATE", default_value = "0.07")]
         false_positive_rate: f64,
-
-        /// File with pwds
-        #[structopt(long, parse(from_os_str))]
-        input: PathBuf,
 
         /// Output file for the filter & metadata
         #[structopt(long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
@@ -54,8 +50,8 @@ fn main() -> io::Result<()> {
     let opt = Opt::from_args();
     match opt {
         Opt::Check{filter_path} => check_pwd_filter(&filter_path),
-        Opt::Create{input, filter_path, expected_num_items, false_positive_rate} =>
-            fill_filter_with_pwd (&input, &filter_path, bloom::ConfigNumRates{items_count:expected_num_items, fp_p:false_positive_rate}),
+        Opt::Create{filter_path, expected_num_items, false_positive_rate} =>
+            fill_filter_with_pwd (&filter_path, bloom::ConfigNumRates{items_count:expected_num_items, fp_p:false_positive_rate}),
     }
 }
 
@@ -94,14 +90,12 @@ fn read_filter (filter_filename: &PathBuf) -> io::Result<Bloom<ExtFile>>
     Ok(Bloom::<ExtFile>::from_bitmap_k_num(ExtFile::from_file(content), config.k_num))
 }
 
-fn fill_filter_with_pwd (pwd_filename: &PathBuf, dst_filename: &PathBuf, opt: bloom::ConfigNumRates)  -> io::Result<()>
+fn fill_filter_with_pwd (dst_filename: &PathBuf, opt: bloom::ConfigNumRates)  -> io::Result<()>
 {
-    let content = fs::File::open(pwd_filename)?;
-    let buf_reader = io::BufReader::new(content);
 
     let mut filter = BloomBitVec::new_for_fp_rate(opt);
 
-    for line in buf_reader.lines()
+    for line in io::stdin().lock().lines()
     {
         filter.set(&normalize_string(&line?));
     }
