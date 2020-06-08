@@ -6,11 +6,8 @@
 //! 2 hash functions, generated with SipHash-1-3 using randomized keys.
 //!
 
-extern crate bit_vec;
 extern crate siphasher;
-extern crate serde;
 
-use bit_vec::BitVec;
 use siphasher::sip::SipHasher13;
 use std::cmp;
 use std::f64;
@@ -36,32 +33,6 @@ pub trait BloomHolderMut : BloomHolder {
     fn zeros(size: usize) -> Self;
 }
 
-
-impl BloomHolder for BitVec {
-    fn get(&mut self, index: usize) -> Option<bool>
-    {
-        BitVec::get(&self, index)
-    }
-
-    fn len (&self) -> usize
-    {
-        BitVec::len(&self)
-    }
-}
-
-
-impl BloomHolderMut for BitVec {
-    fn set_true(&mut self, index: usize)
-    {
-        BitVec::set(self, index, true);
-    }
-
-    fn zeros(size: usize) -> Self
-    {
-        BitVec::from_elem(size, false)
-    }
-
-}
 
 fn get_block_offset (index: usize) -> (usize, usize){
     (index/8, 7-(index%8))
