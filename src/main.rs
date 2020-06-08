@@ -9,21 +9,21 @@ type BloomBitVec = bloom::Bloom<Vec<u8>>;
 
 #[derive(StructOpt, Debug)]
 enum PasswordChecker {
-    // Create a bloom filter with desired parameters and fill with passwords from input file
+    /// Create a bloom filter with desired parameters and fill with passwords from input file
     Create {
 
-        //File with pwds
-        #[structopt(short, long, parse(from_os_str))]
+        ///File with pwds
+        #[structopt(long, parse(from_os_str))]
         input: PathBuf,
 
-        //Output file
-        #[structopt(short, long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
-        output: PathBuf,
+        ///Output file
+        #[structopt(long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
+        filter: PathBuf,
     },
-    // Check if password is present in the filter
+    /// Check if password is present in the filter
     Check {
-        //File with bloom filter
-        #[structopt(short, long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
+        /// File with bloom filter
+        #[structopt(long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
         filter: PathBuf,
     }
 
@@ -32,16 +32,17 @@ enum PasswordChecker {
 
 #[derive(StructOpt, Debug)]
 #[structopt(no_version)]
+/// Check if password present or not in the list using pre-processed bloom filter.
 struct Opt {
     /// Set expected_num_items
-    #[structopt(short, long, env = "PARAMETER_VALUE", default_value = "600000000")]
+    #[structopt(short, long, env = "PASSWORD_LIST_SIZE", default_value = "600000000")]
     expected_num_items: usize,
 
-    // Set desired false positive rate
-    #[structopt(short, long, env = "PARAMETER_VALUE", default_value = "0.07")]
+    /// Set desired false positive rate
+    #[structopt(short, long, env = "FALSE_POSITIVE_RATE", default_value = "0.07")]
     false_positive_rate: f64,
 
-    #[structopt(subcommand)]
+    #[structopt(flatten)]
     cmd: PasswordChecker,
 
 }
@@ -52,7 +53,7 @@ fn main() -> io::Result<()> {
     let opt = Opt::from_args();
     match &opt.cmd {
         PasswordChecker::Check{filter:filter_path} => check_pwd_filter(&filter_path, &opt),
-        PasswordChecker::Create{input, output} => fill_filter_with_pwd (&input, &output, &opt),
+        PasswordChecker::Create{input, filter} => fill_filter_with_pwd (&input, &filter, &opt),
     }
 }
 
