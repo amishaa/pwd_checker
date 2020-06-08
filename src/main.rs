@@ -60,7 +60,7 @@ fn check_pwd_filter (filter_path: &PathBuf, opt: &Opt) -> io::Result<()> {
     let mut filter = read_filter(filter_path, opt)?;
     println!("Enter passwords to check (ctr+D to exit)");
     for line in io::stdin().lock().lines(){
-        println!("{}\n", check_pwd(&line.unwrap(), &mut filter));
+        println!("{}\n", check_pwd(&line?, &mut filter));
     }
     Ok(())
     
@@ -88,7 +88,10 @@ fn fill_filter_with_pwd (pwd_filename: &PathBuf, dst_filename: &PathBuf, opt: &O
 
     let mut filter = BloomBitVec::new_for_fp_rate(opt.expected_num_items, opt.false_positive_rate);
 
-    buf_reader.lines().for_each(|line| filter.set(&normalize_string(&line.unwrap())));
+    for line in buf_reader.lines()
+    {
+        filter.set(&normalize_string(&line?));
+    }
 
     let bitmap = filter.bitmap();
     fs::write(dst_filename, bitmap)?;
