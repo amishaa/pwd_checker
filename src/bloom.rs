@@ -18,6 +18,12 @@ use std::fs::File;
 #[cfg(test)]
 use rand::Rng;
 
+#[derive(Debug)]
+pub struct ConfigNumRates {
+    pub items_count: u64, 
+    pub fp_p: f64,
+}
+
 pub struct ExtFile {
     f: File,
     offset: u64,
@@ -143,9 +149,9 @@ where
     /// Create a new bloom filter structure.
     /// items_count is an estimation of the maximum number of items to store.
     /// fp_p is the wanted rate of false positives, in ]0.0, 1.0[
-    pub fn new_for_fp_rate(items_count: u64, fp_p: f64) -> Self {
-        let bitmap_size = Self::compute_bitmap_size(items_count, fp_p);
-        Bloom::new(bitmap_size, items_count)
+        pub fn new_for_fp_rate(opt: ConfigNumRates) -> Self {
+        let bitmap_size = Self::compute_bitmap_size(opt.items_count, opt.fp_p);
+        Bloom::new(bitmap_size, opt.items_count)
     }
 
     /// Record the presence of an item.
