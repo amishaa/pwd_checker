@@ -1,5 +1,7 @@
 use std::{fs, io::{self, BufRead}, path::PathBuf};
 use structopt::StructOpt;
+use serde;
+use bincode;
 
 
 mod bloom;
@@ -48,6 +50,11 @@ struct Opt {
 
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+struct AppConfig {
+    k_num: u64,
+    version: String,
+}
 
         
 fn main() -> io::Result<()> {
@@ -95,8 +102,15 @@ fn fill_filter_with_pwd (pwd_filename: &PathBuf, dst_filename: &PathBuf, opt: &O
         filter.set(&normalize_string(&line?));
     }
 
-    let (bitmap, _) = filter.bitmap_k_num();
-    fs::write(dst_filename, bitmap)?;
+    let (bitmap, k_num) = filter.bitmap_k_num();
+    let config = AppConfig{k_num, version:env!("CARGO_PKG_VERSION").to_string()};
+    let encoded_config = bincode::serialize(&config).unwrap();
+    let len_prefix: u64 = encoded_config.len() as u64 + 8u64;
+    let mut message: Vec<u8> = vec![];
+    message.extend(len_prefix.to_be_bytes().to_vec());
+    message.extend(encoded_config);
+    message.extend(bitmap);
+    fs::write(dst_filename, message)?;
     Ok(())
 
 }

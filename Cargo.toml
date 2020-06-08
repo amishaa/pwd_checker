@@ -10,3 +10,5 @@ edition = "2018"
 
 siphasher = { version = "", features = ["serde"] }
 structopt = ""
+serde = { version = "", features = ["derive"] }
+bincode = ""
