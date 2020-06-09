@@ -172,20 +172,6 @@ impl<H> Bloom<H>
 where
     H: BloomHolder
 {
-    pub fn from_bitmap_count(bitmap: H, item_count: u64) -> Self
-    {
-        let bitmap_bits: u64 = bitmap.len();
-        let k_num = Self::optimal_k_num(bitmap_bits, item_count);
-        let sips = Self::sips_new();
-        Self {
-            bitmap,
-            bitmap_bits,
-            k_num,
-            sips,
-        }
-    }
-
-
     pub fn from_bitmap_k_num (bitmap: H, k_num: u64) -> Self
     {
         let bitmap_bits = bitmap.len();
