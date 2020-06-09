@@ -10,7 +10,6 @@ use bloom::{BloomHolder, Bloom, ExtFile};
 type BloomBitVec = bloom::Bloom<Vec<u8>>;
 
 #[derive(StructOpt, Debug)]
-#[structopt(no_version)]
 /// Check if password present or not in the list using pre-processed bloom filter.
 enum Opt {
     /// Create a new bloom filter with desired parameters and fill it with passwords from stdin
