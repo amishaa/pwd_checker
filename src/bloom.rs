@@ -89,7 +89,8 @@ pub trait BloomHolder {
 pub trait BloomHolderMut : BloomHolder {
     fn set_true (&mut self, index: u64);
     // size in bits, not bytes
-    fn zeros(size: u64) -> Self;
+    fn zeros (size: u64) -> Self;
+    fn union (&mut self, other: &[u8]);
 }
 
 
@@ -103,6 +104,7 @@ impl BloomHolder for Vec<u8> {
         let (w, b) = get_block_offset(index);
         <[u8]>::get(&self, w as usize).map(|&val| val & (1 << b) != 0)
     }
+
     fn len(&mut self) -> u64
     {
         (Vec::<u8>::len(self)*8) as u64
@@ -116,10 +118,17 @@ impl BloomHolderMut for Vec<u8> {
         let val = self[w] | 1 << b;
         self[w] = val;
     }
+
     fn zeros(size: u64) -> Self
     {
         assert!(size%8 == 0);
         vec![0; (size/8) as usize]
+    }
+
+    fn union (&mut self, other: &[u8])
+    {
+        assert!(Vec::<u8>::len(self) == other.len());
+        self.iter_mut().zip(other).for_each(|(a,b)| *a|= b);
     }
 }
 

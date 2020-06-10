@@ -5,7 +5,7 @@ use bincode;
 
 
 mod bloom;
-use bloom::{BloomHolder, Bloom, ExtFile};
+use bloom::{BloomHolder, BloomHolderMut, Bloom, ExtFile};
 
 type BloomBitVec = bloom::Bloom<Vec<u8>>;
 
@@ -45,9 +45,21 @@ enum Opt {
         #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
         filter_path: PathBuf,
     },
+    /// Union, settings from first valid filter will be pined, all remaining will be dropped
+    Union {
+        /// Input files
+        #[structopt(short, long, parse(from_os_str))]
+        input_paths: Vec<PathBuf>,
+
+
+        /// Output file for the filter
+        #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
+        filter_path: PathBuf,
+
+    }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(PartialEq, serde::Serialize, serde::Deserialize, Debug)]
 struct BloomFilterConfig {
     k_num: u64,
     len: u64,
@@ -70,22 +82,53 @@ fn main() -> io::Result<()> {
                                          fp_p:false_positive_rate}))
             .and_then(|filter| write_filter(&filter_path, filter)),
         Opt::Add{base_filter, filter_path} =>
-            read_filter_in_mem(&base_filter)
+            read_filter(&base_filter)
+            .and_then(read_filter_to_mem)
             .and_then(fill_filter_with_pwd)
+            .and_then(|filter| write_filter(&filter_path, filter)),
+        Opt::Union{filter_path, input_paths} =>
+            filter_union(input_paths)
             .and_then(|filter| write_filter(&filter_path, filter)),
     }
 }
 
-fn assert_data_error <T> (assertion: bool, message: T) -> io::Result<()>
-where T: Into<Box<dyn std::error::Error + Send + Sync>>
+
+fn filter_union(input_paths: Vec<PathBuf>) -> io::Result<BloomBitVec>
 {
-    if assertion{
-        Ok(())
+    let mut result: Option<(Vec<u8>, BloomFilterConfig)> = None;
+    for path in input_paths {
+        let new_filter = read_filter(&path);
+        match new_filter {
+            Err(e) => {
+                eprintln!("File {:?} skipped, read/parsing error: {}", &path, e);
+            },
+            Ok((file, file_filter_config)) =>
+            {
+                match &mut result {
+                    None =>
+                    {
+                        result = Some((file.to_vec(), file_filter_config))
+                    },
+                    Some((filter, config)) =>
+                    {
+                        if file_filter_config == *config {
+                            filter.union (&file.to_vec());
+                        }
+                        else {
+                            eprintln!("File {:?} skipped, incompetible metadata", &path);
+                        }
+                    }
+
+                }
+            }
+        }
     }
-    else {
-        Err(io::Error::new(io::ErrorKind::InvalidData, message))
+    match result {
+        Some((holder, bf_config)) => Ok(BloomBitVec::from_bitmap_k_num(holder, bf_config.k_num)),
+        None => Err(io::Error::new(io::ErrorKind::InvalidData, "No valid files on input"))
     }
 }
+
 
 fn check_pwd_filter (filter_path: &PathBuf) -> io::Result<()> {
     let (holder, bf_config) = read_filter(filter_path)?;
@@ -95,21 +138,11 @@ fn check_pwd_filter (filter_path: &PathBuf) -> io::Result<()> {
         println!("{}\n", check_pwd(&line?, &mut filter));
     }
     Ok(())
-    
 }
 
 
-fn check_pwd <T> (pwd: &str, filter: &mut Bloom <T>) -> bool
-where
-    T: BloomHolder
+fn read_filter_to_mem ((file_holder, bf_config): (ExtFile<fs::File>, BloomFilterConfig)) -> io::Result<BloomBitVec>
 {
-    filter.check(&normalize_string(pwd))
-}
-
-
-fn read_filter_in_mem (filter_filename: &PathBuf) -> io::Result<BloomBitVec>
-{
-    let (file_holder, bf_config) = read_filter(filter_filename)?;
     let holder = file_holder.to_vec();
     Ok(Bloom::from_bitmap_k_num(holder, bf_config.k_num))
 }
@@ -139,6 +172,14 @@ where T: bloom::BloomHolderMut
 }
 
 
+fn check_pwd <T> (pwd: &str, filter: &mut Bloom <T>) -> bool
+where
+    T: BloomHolder
+{
+    filter.check(&normalize_string(pwd))
+}
+
+
 fn write_filter (dst_filename: &PathBuf, filter: BloomBitVec) -> io::Result<()>
 {
     let (mut bitmap, k_num) = filter.bitmap_k_num();
@@ -152,7 +193,17 @@ fn write_filter (dst_filename: &PathBuf, filter: BloomBitVec) -> io::Result<()>
 }
 
 
-#[inline(always)]
+fn assert_data_error (assertion: bool, message: &str) -> io::Result<()>
+{
+    if assertion{
+        Ok(())
+    }
+    else {
+        Err(io::Error::new(io::ErrorKind::InvalidData, message))
+    }
+}
+
+
 fn normalize_string (s:&str) -> String
 {
     s.to_lowercase()
