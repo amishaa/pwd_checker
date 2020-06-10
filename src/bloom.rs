@@ -23,6 +23,7 @@ pub struct ConfigNumRates {
     pub fp_p: f64,
 }
 
+
 pub struct ExtFile <F> {
     f: F,
     offset: u64,
@@ -50,7 +51,9 @@ where F: Read + Seek
         let mut buf = [0u8; 8];
         f.read_exact(&mut buf)?;
         let offset:u64 = u64::from_be_bytes(buf);
-        assert!(offset < 1024);
+        if offset < 8 || offset >= 1024{
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "metadata is corrupt"))
+        }
         let mut metadata = vec![0u8; offset as usize -8];
         f.read_exact(&mut metadata)?;
         Ok((ExtFile{f, offset}, metadata))

@@ -39,12 +39,17 @@ enum Opt {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
-struct AppConfig {
+struct BloomFilterConfig {
     k_num: u64,
-    version: String,
+    len: u64,
 }
 
-        
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+struct AppConfig {
+    version: String,
+    bf_config: BloomFilterConfig,
+}
+
 fn main() -> io::Result<()> {
     let opt = Opt::from_args();
     match opt {
@@ -64,6 +69,7 @@ fn check_pwd_filter (filter_path: &PathBuf) -> io::Result<()> {
     
 }
 
+
 fn check_pwd <T> (pwd: &str, filter: &mut Bloom <T>) -> bool
 where
     T: BloomHolder
@@ -76,12 +82,18 @@ fn read_filter (filter_filename: &PathBuf) -> io::Result<Bloom<ExtFile<fs::File>
 {
     let content = fs::File::open(filter_filename)?;
 
-    let (filter, config_binary) = ExtFile::from_stream(content)?;
-    let config: AppConfig = bincode::deserialize(&config_binary).unwrap();
-    assert!(config.version == env!("CARGO_PKG_VERSION"));
-
-    Ok(Bloom::from_bitmap_k_num(filter, config.k_num))
+    let (mut filter_holder, config_binary) = ExtFile::from_stream(content)?;
+    let config: AppConfig = bincode::deserialize(&config_binary).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "metadata is corrupt or version does not match"))?;
+    if config.version != env!("CARGO_PKG_VERSION"){
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "version in metadata does not match"))
+    }
+    if config.bf_config.len != filter_holder.len()
+    {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "length in metadata does not match"))
+    }
+    Ok(Bloom::from_bitmap_k_num(filter_holder, config.bf_config.k_num))
 }
+
 
 fn fill_filter_with_pwd (dst_filename: &PathBuf, opt: bloom::ConfigNumRates)  -> io::Result<()>
 {
@@ -93,12 +105,16 @@ fn fill_filter_with_pwd (dst_filename: &PathBuf, opt: bloom::ConfigNumRates)  ->
         filter.set(&normalize_string(&line?));
     }
 
-    let (bitmap, k_num) = filter.bitmap_k_num();
-    let config = AppConfig{k_num, version:env!("CARGO_PKG_VERSION").to_string()};
+    let (mut bitmap, k_num) = filter.bitmap_k_num();
+    let config = AppConfig{
+        bf_config: BloomFilterConfig{k_num, len:BloomHolder::len(&mut bitmap)},
+        version: env!("CARGO_PKG_VERSION").to_string()
+    };
     let encoded_config = bincode::serialize(&config).unwrap();
     fs::write(dst_filename, ExtFile::<fs::File>::to_stream(encoded_config, bitmap))?;
     Ok(())
 }
+
 
 #[inline(always)]
 fn normalize_string (s:&str) -> String
