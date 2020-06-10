@@ -74,16 +74,15 @@ struct AppConfig {
 fn main() -> io::Result<()> {
     let opt = Opt::from_args();
     match opt {
-        Opt::Check{filter_path} => check_pwd_filter(&filter_path),
+        Opt::Check{filter_path} => read_filter_to_mem(&filter_path).and_then(check_pwd_filter),
         Opt::New{filter_path, expected_num_items, false_positive_rate} =>
-           fill_filter_with_pwd (
-               BloomBitVec::new_for_fp_rate(
-                   bloom::ConfigNumRates{items_count:expected_num_items, 
-                                         fp_p:false_positive_rate}))
+            Ok(BloomBitVec::new_for_fp_rate(
+                bloom::ConfigNumRates{items_count:expected_num_items,
+                                      fp_p:false_positive_rate}))
+            .and_then(fill_filter_with_pwd)
             .and_then(|filter| write_filter(&filter_path, filter)),
         Opt::Add{base_filter, filter_path} =>
-            read_filter(&base_filter)
-            .and_then(read_filter_to_mem)
+            read_filter_to_mem(&base_filter)
             .and_then(fill_filter_with_pwd)
             .and_then(|filter| write_filter(&filter_path, filter)),
         Opt::Union{filter_path, input_paths} =>
@@ -107,6 +106,7 @@ fn filter_union(input_paths: Vec<PathBuf>) -> io::Result<BloomBitVec>
                 match &mut result {
                     None =>
                     {
+                        println!("Use file {:?} as baseline", &path);
                         result = Some((file.to_vec(), file_filter_config))
                     },
                     Some((filter, config)) =>
@@ -125,14 +125,14 @@ fn filter_union(input_paths: Vec<PathBuf>) -> io::Result<BloomBitVec>
     }
     match result {
         Some((holder, bf_config)) => Ok(BloomBitVec::from_bitmap_k_num(holder, bf_config.k_num)),
-        None => Err(io::Error::new(io::ErrorKind::InvalidData, "No valid files on input"))
+        None => Err(data_error ("No valid files on input"))
     }
 }
 
 
-fn check_pwd_filter (filter_path: &PathBuf) -> io::Result<()> {
-    let (holder, bf_config) = read_filter(filter_path)?;
-    let mut filter = Bloom::from_bitmap_k_num(holder, bf_config.k_num);
+fn check_pwd_filter <T> (mut filter:Bloom<T>) -> io::Result<()>
+where T: BloomHolder
+{
     println!("Enter passwords to check (ctr+D to exit)");
     for line in io::stdin().lock().lines(){
         println!("{}\n", check_pwd(&line?, &mut filter));
@@ -141,8 +141,9 @@ fn check_pwd_filter (filter_path: &PathBuf) -> io::Result<()> {
 }
 
 
-fn read_filter_to_mem ((file_holder, bf_config): (ExtFile<fs::File>, BloomFilterConfig)) -> io::Result<BloomBitVec>
+fn read_filter_to_mem (filter_filename: &PathBuf) -> io::Result<BloomBitVec>
 {
+    let (file_holder, bf_config) = read_filter(filter_filename)?;
     let holder = file_holder.to_vec();
     Ok(Bloom::from_bitmap_k_num(holder, bf_config.k_num))
 }
@@ -153,7 +154,7 @@ fn read_filter (filter_filename: &PathBuf) -> io::Result<(ExtFile<fs::File>, Blo
     let content = fs::File::open(filter_filename)?;
 
     let (mut filter_holder, config_binary) = ExtFile::from_stream(content)?;
-    let config: AppConfig = bincode::deserialize(&config_binary).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "metadata is corrupt or version does not match"))?;
+    let config: AppConfig = bincode::deserialize(&config_binary).map_err(|_| data_error ("metadata is corrupt or version does not match"))?;
     assert_data_error(config.version == env!("CARGO_PKG_VERSION"), "version in metadata does not match")?;
     assert_data_error(config.bf_config.len == filter_holder.len(), "length in metadata does not match")?;
     Ok((filter_holder, config.bf_config))
@@ -192,6 +193,10 @@ fn write_filter (dst_filename: &PathBuf, filter: BloomBitVec) -> io::Result<()>
     Ok(())
 }
 
+fn data_error (message: &str) -> io::Error
+{
+    io::Error::new(io::ErrorKind::InvalidData, message)
+}
 
 fn assert_data_error (assertion: bool, message: &str) -> io::Result<()>
 {
@@ -199,7 +204,7 @@ fn assert_data_error (assertion: bool, message: &str) -> io::Result<()>
         Ok(())
     }
     else {
-        Err(io::Error::new(io::ErrorKind::InvalidData, message))
+        Err(data_error(message))
     }
 }
 

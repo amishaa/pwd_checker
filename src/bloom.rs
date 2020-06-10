@@ -151,7 +151,6 @@ where F: Read + Seek
 }
 
 /// Bloom filter structure
-#[derive(Clone)]
 pub struct Bloom<T>
 where
     T: BloomHolder
