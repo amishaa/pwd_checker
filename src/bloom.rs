@@ -69,6 +69,13 @@ where F: Read + Seek
         message.extend(bitmap);
         message
     }
+
+    pub fn to_vec (mut self) -> Vec<u8> {
+        let mut data = vec![0u8; (self.len() as usize)/8];
+        self.f.seek(SeekFrom::Start(self.offset)).unwrap();
+        self.f.read_exact(&mut data).unwrap();
+        data
+    }
 }
 
 pub trait BloomHolder {

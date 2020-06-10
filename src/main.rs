@@ -15,7 +15,7 @@ enum Opt {
     /// Create a new bloom filter with desired parameters and fill it with passwords from stdin
     ///
     /// We normalize passwords before putting them into the filter
-    Create {
+    New {
 
         /// Set expected_num_items
         #[structopt(short, long, env = "PASSWORD_LIST_SIZE", default_value = "600000000")]
@@ -25,17 +25,26 @@ enum Opt {
         #[structopt(short, long, env = "FALSE_POSITIVE_RATE", default_value = "0.07")]
         false_positive_rate: f64,
 
-        /// Output file for the filter & metadata
+        /// Output file for the filter
         #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
         filter_path: PathBuf,
     },
     /// Check if password is present in the filter 
     Check {
-        /// File with bloom filter & metadata
+        /// File with bloom filter
         #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
         filter_path: PathBuf,
-    }
+    },
+    /// Add new passwords to the filter
+    Add {
+        /// File with base bloom filter
+        #[structopt(short, long, parse(from_os_str))]        
+        base_filter: PathBuf,
 
+        /// Output file for the filter
+        #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
+        filter_path: PathBuf,
+    },
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
@@ -54,8 +63,16 @@ fn main() -> io::Result<()> {
     let opt = Opt::from_args();
     match opt {
         Opt::Check{filter_path} => check_pwd_filter(&filter_path),
-        Opt::Create{filter_path, expected_num_items, false_positive_rate} =>
-            fill_filter_with_pwd (&filter_path, bloom::ConfigNumRates{items_count:expected_num_items, fp_p:false_positive_rate}),
+        Opt::New{filter_path, expected_num_items, false_positive_rate} =>
+           fill_filter_with_pwd (
+               BloomBitVec::new_for_fp_rate(
+                   bloom::ConfigNumRates{items_count:expected_num_items, 
+                                         fp_p:false_positive_rate}))
+            .and_then(|filter| write_filter(&filter_path, filter)),
+        Opt::Add{base_filter, filter_path} =>
+            read_filter_in_mem(&base_filter)
+            .and_then(fill_filter_with_pwd)
+            .and_then(|filter| write_filter(&filter_path, filter)),
     }
 }
 
@@ -90,6 +107,14 @@ where
 }
 
 
+fn read_filter_in_mem (filter_filename: &PathBuf) -> io::Result<BloomBitVec>
+{
+    let (file_holder, bf_config) = read_filter(filter_filename)?;
+    let holder = file_holder.to_vec();
+    Ok(Bloom::from_bitmap_k_num(holder, bf_config.k_num))
+}
+
+
 fn read_filter (filter_filename: &PathBuf) -> io::Result<(ExtFile<fs::File>, BloomFilterConfig)>
 {
     let content = fs::File::open(filter_filename)?;
@@ -102,16 +127,20 @@ fn read_filter (filter_filename: &PathBuf) -> io::Result<(ExtFile<fs::File>, Blo
 }
 
 
-fn fill_filter_with_pwd (dst_filename: &PathBuf, opt: bloom::ConfigNumRates)  -> io::Result<()>
+fn fill_filter_with_pwd <T> (mut filter: bloom::Bloom<T>)  -> io::Result<Bloom<T>>
+where T: bloom::BloomHolderMut
 {
-
-    let mut filter = BloomBitVec::new_for_fp_rate(opt);
 
     for line in io::stdin().lock().lines()
     {
         filter.set(&normalize_string(&line?));
     }
+    Ok(filter)
+}
 
+
+fn write_filter (dst_filename: &PathBuf, filter: BloomBitVec) -> io::Result<()>
+{
     let (mut bitmap, k_num) = filter.bitmap_k_num();
     let config = AppConfig{
         bf_config: BloomFilterConfig{k_num, len:BloomHolder::len(&mut bitmap)},
