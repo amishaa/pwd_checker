@@ -1,4 +1,4 @@
-use std::{fs, io::{self, BufRead, Read}, path::PathBuf};
+use std::{fs, io::{self, BufRead}, path::PathBuf};
 use structopt::StructOpt;
 use serde;
 use bincode;
@@ -96,13 +96,7 @@ fn fill_filter_with_pwd (dst_filename: &PathBuf, opt: bloom::ConfigNumRates)  ->
     let (bitmap, k_num) = filter.bitmap_k_num();
     let config = AppConfig{k_num, version:env!("CARGO_PKG_VERSION").to_string()};
     let encoded_config = bincode::serialize(&config).unwrap();
-    let len_prefix: u64 = encoded_config.len() as u64 + 8u64;
-    assert!(len_prefix < 1024);
-    let mut message: Vec<u8> = vec![];
-    message.extend(len_prefix.to_be_bytes().to_vec());
-    message.extend(encoded_config);
-    message.extend(bitmap);
-    fs::write(dst_filename, message)?;
+    fs::write(dst_filename, ExtFile::<fs::File>::to_stream(encoded_config, bitmap))?;
     Ok(())
 }
 

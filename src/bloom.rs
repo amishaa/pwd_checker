@@ -13,7 +13,6 @@ use std::cmp;
 use std::f64;
 use std::hash::{Hash, Hasher};
 use std::io::{self, Seek, SeekFrom, Read};
-use std::fs::File;
 
 #[cfg(test)]
 use rand::Rng;
@@ -52,9 +51,20 @@ where F: Read + Seek
         f.read_exact(&mut buf)?;
         let offset:u64 = u64::from_be_bytes(buf);
         assert!(offset < 1024);
-        let mut buf2 = vec![0u8; offset as usize -8];
-        f.read_exact(&mut buf2)?;
-        Ok((ExtFile{f, offset}, buf2))
+        let mut metadata = vec![0u8; offset as usize -8];
+        f.read_exact(&mut metadata)?;
+        Ok((ExtFile{f, offset}, metadata))
+    }
+
+    pub fn to_stream (metadata: Vec<u8>, bitmap: Vec<u8>) -> Vec<u8>
+    {
+        let len_prefix: u64 = metadata.len() as u64 + 8u64;
+        assert!(len_prefix < 1024);
+        let mut message: Vec<u8> = vec![];
+        message.extend(len_prefix.to_be_bytes().to_vec());
+        message.extend(metadata);
+        message.extend(bitmap);
+        message
     }
 }
 
