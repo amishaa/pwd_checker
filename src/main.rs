@@ -59,8 +59,20 @@ fn main() -> io::Result<()> {
     }
 }
 
+fn assert_data_error <T> (assertion: bool, message: T) -> io::Result<()>
+where T: Into<Box<dyn std::error::Error + Send + Sync>>
+{
+    if assertion{
+        Ok(())
+    }
+    else {
+        Err(io::Error::new(io::ErrorKind::InvalidData, message))
+    }
+}
+
 fn check_pwd_filter (filter_path: &PathBuf) -> io::Result<()> {
-    let mut filter = read_filter(filter_path)?;
+    let (holder, bf_config) = read_filter(filter_path)?;
+    let mut filter = Bloom::from_bitmap_k_num(holder, bf_config.k_num);
     println!("Enter passwords to check (ctr+D to exit)");
     for line in io::stdin().lock().lines(){
         println!("{}\n", check_pwd(&line?, &mut filter));
@@ -78,20 +90,15 @@ where
 }
 
 
-fn read_filter (filter_filename: &PathBuf) -> io::Result<Bloom<ExtFile<fs::File>>>
+fn read_filter (filter_filename: &PathBuf) -> io::Result<(ExtFile<fs::File>, BloomFilterConfig)>
 {
     let content = fs::File::open(filter_filename)?;
 
     let (mut filter_holder, config_binary) = ExtFile::from_stream(content)?;
     let config: AppConfig = bincode::deserialize(&config_binary).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "metadata is corrupt or version does not match"))?;
-    if config.version != env!("CARGO_PKG_VERSION"){
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "version in metadata does not match"))
-    }
-    if config.bf_config.len != filter_holder.len()
-    {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "length in metadata does not match"))
-    }
-    Ok(Bloom::from_bitmap_k_num(filter_holder, config.bf_config.k_num))
+    assert_data_error(config.version == env!("CARGO_PKG_VERSION"), "version in metadata does not match")?;
+    assert_data_error(config.bf_config.len == filter_holder.len(), "length in metadata does not match")?;
+    Ok((filter_holder, config.bf_config))
 }
 
 
