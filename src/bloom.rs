@@ -12,7 +12,7 @@ use siphasher::sip::SipHasher13;
 use std::cmp;
 use std::f64;
 use std::hash::{Hash, Hasher};
-use std::io::{Seek, SeekFrom, Read};
+use std::io::{self, Seek, SeekFrom, Read};
 use std::fs::File;
 
 #[cfg(test)]
@@ -24,12 +24,15 @@ pub struct ConfigNumRates {
     pub fp_p: f64,
 }
 
-pub struct ExtFile {
-    f: File,
+pub struct ExtFile <F> {
+    f: F,
     offset: u64,
 }
 
-impl ExtFile {
+impl <F> ExtFile<F> 
+where F: Read + Seek
+
+{
     fn read (&mut self, w: usize) -> u8 {
         let mut buf = [0u8;1];
         self.f.seek(SeekFrom::Start(w as u64 + self.offset)).unwrap();
@@ -37,16 +40,21 @@ impl ExtFile {
         buf[0]
     }
 
-    fn len(&self) -> u64 
+    fn len(&mut self) -> u64 
     {
-         (self.f.metadata().unwrap().len() - self.offset)*8
+         (self.f.seek(SeekFrom::End(0)).unwrap() - self.offset)*8
     }
 
-    pub fn from_file (mut f:File) -> Self {
+    pub fn from_stream (mut f:F) -> io::Result<(Self, Vec<u8>)>
+    {
         f.seek(SeekFrom::Start(0)).unwrap();
         let mut buf = [0u8; 8];
-        f.read_exact(&mut buf).unwrap();
-        ExtFile{f, offset:u64::from_be_bytes(buf)}
+        f.read_exact(&mut buf)?;
+        let offset:u64 = u64::from_be_bytes(buf);
+        assert!(offset < 1024);
+        let mut buf2 = vec![0u8; offset as usize -8];
+        f.read_exact(&mut buf2)?;
+        Ok((ExtFile{f, offset}, buf2))
     }
 }
 
@@ -54,7 +62,7 @@ pub trait BloomHolder {
     // get index-th bit
     fn get (&mut self, index: u64) -> Option<bool>;
     // size in bits, not bytes
-    fn len (&self) -> u64;
+    fn len (&mut self) -> u64;
 }
 
 
@@ -75,9 +83,9 @@ impl BloomHolder for Vec<u8> {
         let (w, b) = get_block_offset(index);
         <[u8]>::get(&self, w as usize).map(|&val| val & (1 << b) != 0)
     }
-    fn len(&self) -> u64
+    fn len(&mut self) -> u64
     {
-        (Vec::<u8>::len(&self)*8) as u64
+        (Vec::<u8>::len(self)*8) as u64
     }
 }
 
@@ -95,7 +103,9 @@ impl BloomHolderMut for Vec<u8> {
     }
 }
 
-impl BloomHolder for ExtFile {
+impl <F> BloomHolder for ExtFile <F> 
+where F: Read + Seek
+{
     fn get (&mut self, index: u64) -> Option<bool>
     {
         if index > self.len() {
@@ -105,9 +115,9 @@ impl BloomHolder for ExtFile {
         let val = self.read(w);
         Some(val & (1<<b) != 0)
     }
-    fn len (&self) -> u64
+    fn len (&mut self) -> u64
     {
-        ExtFile::len(&self)
+        ExtFile::len(self)
     }
 }
 
@@ -172,7 +182,7 @@ impl<H> Bloom<H>
 where
     H: BloomHolder
 {
-    pub fn from_bitmap_k_num (bitmap: H, k_num: u64) -> Self
+    pub fn from_bitmap_k_num (mut bitmap: H, k_num: u64) -> Self
     {
         let bitmap_bits = bitmap.len();
         Self {

@@ -72,21 +72,15 @@ where
 }
 
 
-fn read_filter (filter_filename: &PathBuf) -> io::Result<Bloom<ExtFile>>
+fn read_filter (filter_filename: &PathBuf) -> io::Result<Bloom<ExtFile<fs::File>>>
 {
-    let mut content = fs::File::open(filter_filename)?;
+    let content = fs::File::open(filter_filename)?;
 
-    let mut buf_len = [0u8; 8];
-    content.read_exact(&mut buf_len)?;
-    let len_prefix = u64::from_be_bytes(buf_len);
-    assert!(len_prefix < 1024);
-    let mut buf = vec![0; (len_prefix - 8) as usize];
-    content.read_exact(&mut buf)?;
-    let config: AppConfig = bincode::deserialize(&buf).unwrap();
-
+    let (filter, config_binary) = ExtFile::from_stream(content)?;
+    let config: AppConfig = bincode::deserialize(&config_binary).unwrap();
     assert!(config.version == env!("CARGO_PKG_VERSION"));
 
-    Ok(Bloom::<ExtFile>::from_bitmap_k_num(ExtFile::from_file(content), config.k_num))
+    Ok(Bloom::from_bitmap_k_num(filter, config.k_num))
 }
 
 fn fill_filter_with_pwd (dst_filename: &PathBuf, opt: bloom::ConfigNumRates)  -> io::Result<()>
