@@ -26,13 +26,13 @@ enum Opt {
         false_positive_rate: f64,
 
         /// Output file for the filter & metadata
-        #[structopt(long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
+        #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
         filter_path: PathBuf,
     },
     /// Check if password is present in the filter 
     Check {
         /// File with bloom filter & metadata
-        #[structopt(long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
+        #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
         filter_path: PathBuf,
     }
 
