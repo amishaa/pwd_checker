@@ -10,20 +10,26 @@ use bloom::{BloomHolder, BloomHolderMut, Bloom, ExtFile};
 type BloomBitVec = bloom::Bloom<Vec<u8>>;
 
 #[derive(StructOpt, Debug)]
+struct NewFilterOptions
+{
+    /// Set expected_num_items
+    #[structopt(short, long, env = "PASSWORD_LIST_SIZE", default_value = "600000000")]
+    expected_num_items: u64,
+
+    /// Set desired false positive rate
+    #[structopt(short, long, env = "FALSE_POSITIVE_RATE", default_value = "0.07")]
+    false_positive_rate: f64,
+}
+
+#[derive(StructOpt, Debug)]
 /// Check if password present or not in the list using pre-processed bloom filter.
 enum Opt {
     /// Create a new bloom filter with desired parameters and fill it with passwords from stdin
     ///
     /// We normalize passwords before putting them into the filter
     New {
-
-        /// Set expected_num_items
-        #[structopt(short, long, env = "PASSWORD_LIST_SIZE", default_value = "600000000")]
-        expected_num_items: u64,
-
-        /// Set desired false positive rate
-        #[structopt(short, long, env = "FALSE_POSITIVE_RATE", default_value = "0.07")]
-        false_positive_rate: f64,
+        #[structopt(flatten)]
+        nfo : NewFilterOptions,
 
         /// Output file for the filter
         #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
@@ -62,7 +68,16 @@ enum Opt {
         ///Input file
         #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
         filter_path: PathBuf,
-    }
+    },
+    /// Give information on filter size
+    DryRun {
+        #[structopt(flatten)]
+        nfo: NewFilterOptions,
+
+        /// Not used, for compatibility only
+        #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
+        filter_path: Option<PathBuf>,
+    },
 }
 
 #[derive(PartialEq, serde::Serialize, serde::Deserialize, Debug)]
@@ -82,10 +97,10 @@ fn main() -> io::Result<()> {
     let opt = Opt::from_args();
     match opt {
         Opt::Check{filter_path} => read_filter_to_mem(&filter_path).and_then(check_pwd_filter),
-        Opt::New{filter_path, expected_num_items, false_positive_rate} =>
+        Opt::New{filter_path, nfo} =>
             Ok(BloomBitVec::new_for_fp_rate(
-                bloom::ConfigNumRates{items_count:expected_num_items,
-                                      fp_p:false_positive_rate}))
+                &bloom::ConfigNumRates{items_count:nfo.expected_num_items,
+                                      fp_p:nfo.false_positive_rate}))
             .and_then(fill_filter_with_pwd)
             .and_then(|filter| write_filter(&filter_path, filter)),
         Opt::Add{base_filter, filter_path} =>
@@ -96,6 +111,12 @@ fn main() -> io::Result<()> {
             filter_union(input_paths)
             .and_then(|filter| write_filter(&filter_path, filter)),
         Opt::Statistic{filter_path} => get_statistics(&filter_path),
+        Opt::DryRun{nfo, filter_path:_} => {
+            println!("Expected size (in bytes) is {}", BloomBitVec::compute_bitmap_size(
+                    &bloom::ConfigNumRates{items_count:nfo.expected_num_items,
+                                  fp_p:nfo.false_positive_rate}));
+            Ok(())
+        },
     }
 }
 

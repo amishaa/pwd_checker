@@ -208,8 +208,8 @@ where
     /// Create a new bloom filter structure.
     /// items_count is an estimation of the maximum number of items to store.
     /// fp_p is the wanted rate of false positives, in ]0.0, 1.0[
-        pub fn new_for_fp_rate(opt: ConfigNumRates) -> Self {
-        let bitmap_size = Self::compute_bitmap_size(opt.items_count, opt.fp_p);
+    pub fn new_for_fp_rate(opt: &ConfigNumRates) -> Self {
+        let bitmap_size = Self::compute_bitmap_size(&opt);
         Bloom::new(bitmap_size, opt.items_count)
     }
 
@@ -272,7 +272,7 @@ where
     /// Compute a recommended bitmap size for items_count items
     /// and a fp_p rate of false positives.
     /// fp_p obviously has to be within the ]0.0, 1.0[ range.
-    pub fn compute_bitmap_size(items_count: u64, fp_p: f64) -> u64 {
+    pub fn compute_bitmap_size(&ConfigNumRates{items_count, fp_p}: &ConfigNumRates) -> u64 {
         assert!(items_count > 0);
         assert!(fp_p > 0.0 && fp_p < 1.0);
         let log2 = f64::consts::LN_2;
