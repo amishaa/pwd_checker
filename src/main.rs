@@ -56,6 +56,12 @@ enum Opt {
         #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
         filter_path: PathBuf,
 
+    },
+    /// Print statistic of the filter
+    Statistic {
+        ///Input file
+        #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
+        filter_path: PathBuf,
     }
 }
 
@@ -69,6 +75,7 @@ struct BloomFilterConfig {
 struct AppConfig {
     version: String,
     bf_config: BloomFilterConfig,
+    ones: u64,
 }
 
 fn main() -> io::Result<()> {
@@ -88,6 +95,7 @@ fn main() -> io::Result<()> {
         Opt::Union{filter_path, input_paths} =>
             filter_union(input_paths)
             .and_then(|filter| write_filter(&filter_path, filter)),
+        Opt::Statistic{filter_path} => get_statistics(&filter_path),
     }
 }
 
@@ -161,6 +169,24 @@ fn read_filter (filter_filename: &PathBuf) -> io::Result<(ExtFile<fs::File>, Blo
 }
 
 
+fn get_statistics (filter_filename: &PathBuf) -> io::Result<()>
+{
+    let content = fs::File::open(filter_filename)?;
+
+    let (_, config_binary) = ExtFile::from_stream(content)?;
+    let config: AppConfig = bincode::deserialize(&config_binary).map_err(|_| data_error ("metadata is corrupt or version does not match"))?;
+    assert_data_error(config.version == env!("CARGO_PKG_VERSION"), "version in metadata does not match")?;
+    let BloomFilterConfig{k_num, len} = config.bf_config;
+    let ones = config.ones;
+    let ones_rate = (ones as f64)/(len as f64);
+    println!("Lenght (in bits): {}", len);
+    println!("Number of hashers: {}", k_num);
+    println!("Number of ones: {}", ones);
+    println!("False positive rate: {}%",  (100.*ones_rate.powi(k_num as i32)).round());
+    println!("Estimated number of uniq passwords in the filter: {}", -((1. - ones_rate).ln()/(k_num as f64)*(len as f64)).ceil());
+    Ok(())
+}
+
 fn fill_filter_with_pwd <T> (mut filter: bloom::Bloom<T>)  -> io::Result<Bloom<T>>
 where T: bloom::BloomHolderMut
 {
@@ -186,7 +212,8 @@ fn write_filter (dst_filename: &PathBuf, filter: BloomBitVec) -> io::Result<()>
     let (mut bitmap, k_num) = filter.bitmap_k_num();
     let config = AppConfig{
         bf_config: BloomFilterConfig{k_num, len:BloomHolder::len(&mut bitmap)},
-        version: env!("CARGO_PKG_VERSION").to_string()
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        ones: bitmap.count_ones(),
     };
     let encoded_config = bincode::serialize(&config).unwrap();
     fs::write(dst_filename, ExtFile::<fs::File>::to_stream(encoded_config, bitmap))?;

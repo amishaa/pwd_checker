@@ -12,7 +12,7 @@ use siphasher::sip::SipHasher13;
 use std::cmp;
 use std::f64;
 use std::hash::{Hash, Hasher};
-use std::io::{self, Seek, SeekFrom, Read};
+use std::{io::{self, Seek, SeekFrom, Read}};
 
 #[cfg(test)]
 use rand::Rng;
@@ -29,9 +29,9 @@ pub struct ExtFile <F> {
     offset: u64,
 }
 
+
 impl <F> ExtFile<F> 
 where F: Read + Seek
-
 {
     fn read (&mut self, w: usize) -> u8 {
         let mut buf = [0u8;1];
@@ -76,6 +76,16 @@ where F: Read + Seek
         self.f.read_exact(&mut data).unwrap();
         data
     }
+
+    pub fn count_ones (&mut self) -> u64 {
+        self.f.seek(SeekFrom::Start(self.offset)).unwrap();
+        let mut result = 0;
+        let mut buf = [0u8;1];
+        while self.f.read(&mut buf).unwrap() > 0{
+            result += buf[0].count_ones() as u64;
+        }
+        result
+    }
 }
 
 pub trait BloomHolder {
@@ -83,6 +93,7 @@ pub trait BloomHolder {
     fn get (&mut self, index: u64) -> Option<bool>;
     // size in bits, not bytes
     fn len (&mut self) -> u64;
+    fn count_ones (&mut self) -> u64;
 }
 
 
@@ -108,6 +119,10 @@ impl BloomHolder for Vec<u8> {
     fn len(&mut self) -> u64
     {
         (Vec::<u8>::len(self)*8) as u64
+    }
+
+    fn count_ones (&mut self) -> u64 {
+        self.iter().map(|x| x.count_ones() as u64).sum()
     }
 }
 
@@ -144,9 +159,15 @@ where F: Read + Seek
         let val = self.read(w);
         Some(val & (1<<b) != 0)
     }
+    
     fn len (&mut self) -> u64
     {
         ExtFile::len(self)
+    }
+
+    fn count_ones (&mut self) -> u64
+    {
+        ExtFile::count_ones(self)
     }
 }
 
@@ -236,7 +257,7 @@ where
         true
     }
 
-    /// Return the bitmap as a vector of bytes
+    /// Return the bitmap and k_num 
     pub fn bitmap_k_num(self) -> (H, u64) {
         (self.bitmap, self.k_num)
     }
