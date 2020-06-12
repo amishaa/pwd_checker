@@ -57,6 +57,10 @@ enum Opt {
         /// Output file for the filter
         #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
         filter_path: PathBuf,
+
+        /// Dry run. Equvivalent to dry_run command
+        #[structopt(long)]
+        dry_run: bool,
     },
     /// Check if password is present in the filter 
     Check {
@@ -120,11 +124,11 @@ fn main() -> io::Result<()> {
     let opt = Opt::from_args();
     match &opt {
         Opt::Check{filter_path} => read_filter_to_mem(filter_path).and_then(check_pwd_filter),
-        Opt::New{filter_path, nfo} =>
+        Opt::New{filter_path, nfo, dry_run: false} =>
             Ok(BloomBitVec::new(&nfo.to_bloom_config()))
             .and_then(fill_filter_with_pwd)
             .and_then(|filter| write_filter(filter_path, filter)),
-        Opt::DryRun{nfo, filter_path:_} =>
+        Opt::DryRun{nfo, filter_path:_} | Opt::New {nfo, filter_path:_, dry_run: true} =>
             print_bloom_config(nfo.to_bloom_config(), None, None),
         Opt::Add{base_filter, filter_path} =>
             read_filter_to_mem(base_filter)
