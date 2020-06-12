@@ -285,13 +285,6 @@ where
     }
 }
 
-pub fn optimal_k_num(bitmap_bits: u64, items_count: u64) -> u64 {
-    let m = bitmap_bits as f64;
-    let n = items_count as f64;
-    let k_num = (m / n * f64::ln(2.0f64)).ceil() as u64;
-    cmp::max(k_num, 1)
-}
-
 /// Compute a recommended bitmap size for items_count items
 /// and a fp_p rate of false positives.
 /// fp_p obviously has to be within the ]0.0, 1.0[ range.
