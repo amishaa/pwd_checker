@@ -25,12 +25,33 @@ pub struct BloomFilterConfig {
 }
 
 impl BloomFilterConfig {
-    pub fn info(&self) -> String {
-        format!("Size (in bytes): {}\nNumber of hashers: {}\nExpected fp rate {:.2}% under load below {} items", 
+    pub fn info(&self, load: Option<u64>, fp_rate: Option<f64>) -> String {
+        format!("Size (in bytes): {}\nNumber of hashers: {}\nExpected fp rate {:.2}% under load below {} items{}{}", 
                 self.filter_size, 
                 self.k_num, 
                 0.5f64.powi(self.k_num as i32)*100.,
-                ((self.filter_size as f64)*8./(self.k_num as f64)*LN_2).ceil() as u64)
+                ((self.filter_size as f64)*8./(self.k_num as f64)*LN_2).ceil() as u64,
+                if let Some(items_count) = load {
+                    format!("\nWith load {} fp rate will be {:.2}%", items_count, self.estimate_fp_rate(items_count)*100.)
+                } else {"".to_string()},
+                if let Some(fp_p) = fp_rate {
+                    let load = self.max_capacity (fp_p);
+                    format!("\nWith load {} fp rate will be {:.2}%", load,  self.estimate_fp_rate(load)*100.)
+                } else {"".to_string()}
+                )
+    }
+
+
+    pub fn max_capacity (&self, fp_rate: f64) -> u64 
+    {
+        let one_rate = fp_rate.powf(1./self.k_num as f64);
+        ((1. - one_rate).ln()/self.k_num as f64*self.filter_size as f64 * -8.).floor() as u64
+    }
+
+    pub fn estimate_fp_rate (&self, items_count: u64) -> f64
+    {
+        let zero_rate = (-((self.k_num*items_count) as f64)/(self.filter_size as f64)/8.).exp();
+        (1. - zero_rate).powi(self.k_num as i32)
     }
 }
 
@@ -284,14 +305,21 @@ where
     }
 }
 
+fn compute_size_from_items_k_num_fp (items_count: u64, k_num: u64, fp_p: f64) -> u64
+{
+    let ones_rate = fp_p.powf(1./k_num as f64);
+    (items_count as f64 * k_num as f64 / -8. /( (1. - ones_rate).ln()) ).ceil() as u64
+}
+
+
 /// Compute a recommended bitmap size for items_count items
 /// and a fp_p rate of false positives.
 /// fp_p obviously has to be within the ]0.0, 1.0[ range.
 pub fn compute_settings_from_items_fp(items_count: u64, fp_p: f64) -> BloomFilterConfig {
     assert!(items_count > 0);
     assert!(fp_p > 0.0 && fp_p < 1.0);
-    let k_num = (-fp_p.log2()).ceil() as u64;
-    let filter_size = (((items_count*k_num) as f64)/8./LN_2).ceil() as u64; 
+    let k_num_vars = [(-fp_p.log2()).ceil() as u64, 1.max((-fp_p.log2()).floor() as u64)];
+    let (filter_size, k_num) = k_num_vars.iter().map(|&k_num_var| (compute_size_from_items_k_num_fp(items_count, k_num_var, fp_p), k_num_var)).min().unwrap();
     BloomFilterConfig{k_num, filter_size}
 }
 
@@ -299,7 +327,8 @@ pub fn compute_settings_from_items_fp(items_count: u64, fp_p: f64) -> BloomFilte
 pub fn compute_settings_from_size_fp(filter_size: u64, fp_p: f64) -> BloomFilterConfig {
     assert!(filter_size > 0);
     assert!(fp_p > 0.0 && fp_p < 1.0);
-    let k_num = (-fp_p.log2()).ceil() as u64;
+    let k_num_vars = [(-fp_p.log2()).ceil() as u64, 1.max((-fp_p.log2()).floor() as u64)];
+    let (_, k_num) = k_num_vars.iter().map(|&k_num_var| (BloomFilterConfig{k_num: k_num_var, filter_size}.max_capacity(fp_p), k_num_var)).max().unwrap();
     BloomFilterConfig{k_num, filter_size}
 }
 
@@ -307,6 +336,9 @@ pub fn compute_settings_from_size_fp(filter_size: u64, fp_p: f64) -> BloomFilter
 pub fn compute_settings_from_size_items (filter_size: u64, items_count: u64) -> BloomFilterConfig {
     assert!(filter_size > 0);
     assert!(items_count > 0);
-    let k_num = 1.max((filter_size as f64 * 8./items_count as f64*LN_2).floor() as u64);
+    let k_num_vars = [(filter_size as f64*8./items_count as f64*LN_2).ceil() as u64, 1.max((filter_size as f64 * 8./items_count as f64*LN_2).floor() as u64)];
+    let (_, k_num) = k_num_vars.iter().map(|&k_num_var| (BloomFilterConfig{k_num: k_num_var, filter_size}
+                                                         .estimate_fp_rate(items_count), k_num_var))
+          .min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
     BloomFilterConfig{k_num, filter_size}
 }

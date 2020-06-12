@@ -23,7 +23,7 @@ struct NewFilterOptions
 
 impl NewFilterOptions 
 {
-    fn to_bloom_config (self) -> BloomFilterConfig {
+    fn to_bloom_config (&self) -> BloomFilterConfig {
         BloomFilterConfig{filter_size: self.filter_size, k_num: self.k_num}
     }
 }
@@ -116,29 +116,29 @@ struct AppConfig {
 
 fn main() -> io::Result<()> {
     let opt = Opt::from_args();
-    match opt {
-        Opt::Check{filter_path} => read_filter_to_mem(&filter_path).and_then(check_pwd_filter),
+    match &opt {
+        Opt::Check{filter_path} => read_filter_to_mem(filter_path).and_then(check_pwd_filter),
         Opt::New{filter_path, nfo} =>
             Ok(BloomBitVec::new(&nfo.to_bloom_config()))
             .and_then(fill_filter_with_pwd)
-            .and_then(|filter| write_filter(&filter_path, filter)),
+            .and_then(|filter| write_filter(filter_path, filter)),
         Opt::DryRun{nfo, filter_path:_} =>
-            print_bloom_config(nfo.to_bloom_config()),
+            print_bloom_config(nfo.to_bloom_config(), None, None),
         Opt::Add{base_filter, filter_path} =>
-            read_filter_to_mem(&base_filter)
+            read_filter_to_mem(base_filter)
             .and_then(fill_filter_with_pwd)
-            .and_then(|filter| write_filter(&filter_path, filter)),
+            .and_then(|filter| write_filter(filter_path, filter)),
         Opt::Union{filter_path, input_paths} =>
             filter_union(input_paths)
-            .and_then(|filter| write_filter(&filter_path, filter)),
-        Opt::Statistic{filter_path} => get_statistics(&filter_path),
+            .and_then(|filter| write_filter(filter_path, filter)),
+        Opt::Statistic{filter_path} => get_statistics(filter_path),
         Opt::Calculate{calculate_config} => calculate_optimal(calculate_config)
-            .and_then(print_bloom_config),
+            .and_then(|config| print_bloom_config(config, calculate_config.items_number, calculate_config.false_positive)),
     }
 }
 
 
-fn filter_union(input_paths: Vec<PathBuf>) -> io::Result<BloomBitVec>
+fn filter_union(input_paths: &Vec<PathBuf>) -> io::Result<BloomBitVec>
 {
     let mut result: Option<(Vec<u8>, BloomFilterConfig)> = None;
     for path in input_paths {
@@ -223,7 +223,7 @@ fn get_statistics (filter_filename: &PathBuf) -> io::Result<()>
     println!("Number of ones: {}", ones);
     println!("False positive rate: {:.2}%",  (100.*ones_rate.powi(k_num as i32)));
     println!("Estimated number of uniq passwords in the filter: {}", -((1. - ones_rate).ln()/(k_num as f64)*(filter_len as f64)).ceil());
-    println!("Original settings were \"{}\"", config.bf_config.info());
+    println!("Original settings were \"{}\"", config.bf_config.info(None, None));
     Ok(())
 }
 
@@ -267,9 +267,9 @@ fn data_error (message: &str) -> io::Error
 }
 
 
-fn print_bloom_config(filter_config: BloomFilterConfig) -> io::Result<()>
+fn print_bloom_config(filter_config: BloomFilterConfig, load: Option<u64>, fp_rate: Option<f64>) -> io::Result<()>
 {
-    println!("{}", filter_config.info());
+    println!("{}", filter_config.info(load, fp_rate));
     Ok(())
 }
 
@@ -291,7 +291,7 @@ fn normalize_string (s:&str) -> String
 }
 
 
-fn calculate_optimal(CalculateConfig{filter_size, false_positive, items_number} : CalculateConfig) -> io::Result<BloomFilterConfig>
+fn calculate_optimal(&CalculateConfig{filter_size, false_positive, items_number}: &CalculateConfig) -> io::Result<BloomFilterConfig>
 {
     let passed_args = vec![filter_size.is_some(), false_positive.is_some(), items_number.is_some()].into_iter().filter(|&x| x).count();
     assert_data_error(passed_args == 2, &format!("Two and only two items should be specified, but {} specified", passed_args))?;
