@@ -50,7 +50,7 @@ enum Opt {
     /// Create a new bloom filter with desired parameters and fill it with passwords from stdin
     ///
     /// We normalize passwords before putting them into the filter
-    New {
+    Create {
         #[structopt(flatten)]
         nfo : NewFilterOptions,
 
@@ -91,19 +91,10 @@ enum Opt {
 
     },
     /// Print statistic of the filter
-    Statistic {
+    Info {
         ///Input file
         #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
         filter_path: PathBuf,
-    },
-    /// Give information on filter size
-    DryRun {
-        #[structopt(flatten)]
-        nfo: NewFilterOptions,
-
-        /// Not used, for compatibility only
-        #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
-        filter_path: Option<PathBuf>,
     },
     /// Calculate settings for the filter based on 2 of size, expected number of items, false
     /// positive rate
@@ -124,11 +115,11 @@ fn main() -> io::Result<()> {
     let opt = Opt::from_args();
     match &opt {
         Opt::Check{filter_path} => read_filter_to_mem(filter_path).and_then(check_pwd_filter),
-        Opt::New{filter_path, nfo, dry_run: false} =>
+        Opt::Create{filter_path, nfo, dry_run: false} =>
             Ok(BloomBitVec::new(&nfo.to_bloom_config()))
             .and_then(fill_filter_with_pwd)
             .and_then(|filter| write_filter(filter_path, filter)),
-        Opt::DryRun{nfo, filter_path:_} | Opt::New {nfo, filter_path:_, dry_run: true} =>
+        Opt::Create {nfo, filter_path:_, dry_run: true} =>
             print_bloom_config(nfo.to_bloom_config(), None, None),
         Opt::Add{base_filter, filter_path} =>
             read_filter_to_mem(base_filter)
@@ -137,7 +128,7 @@ fn main() -> io::Result<()> {
         Opt::Union{filter_path, input_paths} =>
             filter_union(input_paths)
             .and_then(|filter| write_filter(filter_path, filter)),
-        Opt::Statistic{filter_path} => get_statistics(filter_path),
+        Opt::Info{filter_path} => get_statistics(filter_path),
         Opt::Calculate{calculate_config} => calculate_optimal(calculate_config)
             .and_then(|config| print_bloom_config(config, calculate_config.items_number, calculate_config.false_positive)),
     }
