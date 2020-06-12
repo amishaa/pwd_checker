@@ -295,10 +295,26 @@ pub fn optimal_k_num(bitmap_bits: u64, items_count: u64) -> u64 {
 /// Compute a recommended bitmap size for items_count items
 /// and a fp_p rate of false positives.
 /// fp_p obviously has to be within the ]0.0, 1.0[ range.
-pub fn compute_settings_from_item_fp(items_count: u64, fp_p: f64) -> BloomFilterConfig {
+pub fn compute_settings_from_items_fp(items_count: u64, fp_p: f64) -> BloomFilterConfig {
     assert!(items_count > 0);
     assert!(fp_p > 0.0 && fp_p < 1.0);
     let k_num = (-fp_p.log2()).ceil() as u64;
     let filter_size = (((items_count*k_num) as f64)/8./LN_2).ceil() as u64; 
+    BloomFilterConfig{k_num, filter_size}
+}
+
+/// Compute a recommended settings for size in bytes and false positive rate
+pub fn compute_settings_from_size_fp(filter_size: u64, fp_p: f64) -> BloomFilterConfig {
+    assert!(filter_size > 0);
+    assert!(fp_p > 0.0 && fp_p < 1.0);
+    let k_num = (-fp_p.log2()).ceil() as u64;
+    BloomFilterConfig{k_num, filter_size}
+}
+
+/// Compute a recommended settings for size in bytes and number of item
+pub fn compute_settings_from_size_items (filter_size: u64, items_count: u64) -> BloomFilterConfig {
+    assert!(filter_size > 0);
+    assert!(items_count > 0);
+    let k_num = (filter_size as f64 * 8./items_count as f64*LN_2).ceil() as u64;
     BloomFilterConfig{k_num, filter_size}
 }

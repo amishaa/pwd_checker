@@ -13,7 +13,7 @@ type BloomBitVec = bloom::Bloom<Vec<u8>>;
 struct NewFilterOptions
 {
     /// Set desired size in bytedesired size in bytes
-    #[structopt(short, long, env = "FILTER_SIZE", default_value = "3462468095")]
+    #[structopt(short = "-s", long, env = "FILTER_SIZE", default_value = "3462468095")]
     filter_size: u64,
 
     /// Set desired false positive rate
@@ -26,6 +26,22 @@ impl NewFilterOptions
     fn to_bloom_config (self) -> BloomFilterConfig {
         BloomFilterConfig{filter_size: self.filter_size, k_num: self.k_num}
     }
+}
+
+#[derive(StructOpt, Debug)]
+struct CalculateConfig
+{
+    /// Set desired size in bytedesired size in bytes
+    #[structopt(short = "-s", long, env = "FILTER_SIZE")]
+    filter_size: Option<u64>,
+
+    /// Set desired faslse positive rate
+    #[structopt(short, long)]
+    false_positive: Option<f64>,
+
+    /// Set desired number of items in the filter
+    #[structopt(short, long)]
+    items_number: Option<u64>,
 }
 
 #[derive(StructOpt, Debug)]
@@ -85,6 +101,10 @@ enum Opt {
         #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
         filter_path: Option<PathBuf>,
     },
+    Calculate {
+        #[structopt(flatten)]
+        calculate_config: CalculateConfig,
+    },
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
@@ -102,6 +122,8 @@ fn main() -> io::Result<()> {
             Ok(BloomBitVec::new(&nfo.to_bloom_config()))
             .and_then(fill_filter_with_pwd)
             .and_then(|filter| write_filter(&filter_path, filter)),
+        Opt::DryRun{nfo, filter_path:_} =>
+            print_bloom_config(nfo.to_bloom_config()),
         Opt::Add{base_filter, filter_path} =>
             read_filter_to_mem(&base_filter)
             .and_then(fill_filter_with_pwd)
@@ -110,10 +132,8 @@ fn main() -> io::Result<()> {
             filter_union(input_paths)
             .and_then(|filter| write_filter(&filter_path, filter)),
         Opt::Statistic{filter_path} => get_statistics(&filter_path),
-        Opt::DryRun{nfo, filter_path:_} => {
-            println!("{}", nfo.to_bloom_config().info());
-            Ok(())
-        },
+        Opt::Calculate{calculate_config} => calculate_optimal(calculate_config)
+            .and_then(print_bloom_config),
     }
 }
 
@@ -240,10 +260,19 @@ fn write_filter (dst_filename: &PathBuf, filter: BloomBitVec) -> io::Result<()>
     Ok(())
 }
 
+
 fn data_error (message: &str) -> io::Error
 {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
+
+
+fn print_bloom_config(filter_config: BloomFilterConfig) -> io::Result<()>
+{
+    println!("{}", filter_config.info());
+    Ok(())
+}
+
 
 fn assert_data_error (assertion: bool, message: &str) -> io::Result<()>
 {
@@ -260,3 +289,22 @@ fn normalize_string (s:&str) -> String
 {
     s.to_lowercase()
 }
+
+
+fn calculate_optimal(CalculateConfig{filter_size, false_positive, items_number} : CalculateConfig) -> io::Result<BloomFilterConfig>
+{
+    let passed_args = vec![filter_size.is_some(), false_positive.is_some(), items_number.is_some()].into_iter().filter(|&x| x).count();
+    assert_data_error(passed_args == 2, &format!("Two and only two items should be specified, but {} specified", passed_args))?;
+    if let Some(size) = filter_size {
+        if let Some(fp_rate) = false_positive {
+            Ok(bloom::compute_settings_from_size_fp(size, fp_rate))
+        }
+        else {
+            Ok(bloom::compute_settings_from_size_items(size, items_number.unwrap()))
+        }
+    }
+    else {
+        Ok(bloom::compute_settings_from_items_fp(items_number.unwrap(), false_positive.unwrap()))
+    }
+}
+
