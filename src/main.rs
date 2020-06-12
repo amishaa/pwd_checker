@@ -5,20 +5,27 @@ use bincode;
 
 
 mod bloom;
-use bloom::{BloomHolder, BloomHolderMut, Bloom, ExtFile};
+use bloom::{BloomHolder, BloomFilterConfig,  BloomHolderMut, Bloom, ExtFile};
 
 type BloomBitVec = bloom::Bloom<Vec<u8>>;
 
 #[derive(StructOpt, Debug)]
 struct NewFilterOptions
 {
-    /// Set expected_num_items
-    #[structopt(short, long, env = "PASSWORD_LIST_SIZE", default_value = "600000000")]
-    expected_num_items: u64,
+    /// Set desired size in bytedesired size in bytes
+    #[structopt(short, long, env = "FILTER_SIZE", default_value = "3462468095")]
+    filter_size: u64,
 
     /// Set desired false positive rate
-    #[structopt(short, long, env = "FALSE_POSITIVE_RATE", default_value = "0.07")]
-    false_positive_rate: f64,
+    #[structopt(short, long, env = "HASHER_NUMBER", default_value = "4")]
+    k_num: u64,
+}
+
+impl NewFilterOptions 
+{
+    fn to_bloom_config (self) -> BloomFilterConfig {
+        BloomFilterConfig{filter_size: self.filter_size, k_num: self.k_num}
+    }
 }
 
 #[derive(StructOpt, Debug)]
@@ -80,12 +87,6 @@ enum Opt {
     },
 }
 
-#[derive(PartialEq, serde::Serialize, serde::Deserialize, Debug)]
-struct BloomFilterConfig {
-    k_num: u64,
-    len: u64,
-}
-
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 struct AppConfig {
     version: String,
@@ -98,9 +99,7 @@ fn main() -> io::Result<()> {
     match opt {
         Opt::Check{filter_path} => read_filter_to_mem(&filter_path).and_then(check_pwd_filter),
         Opt::New{filter_path, nfo} =>
-            Ok(BloomBitVec::new_for_fp_rate(
-                &bloom::ConfigNumRates{items_count:nfo.expected_num_items,
-                                      fp_p:nfo.false_positive_rate}))
+            Ok(BloomBitVec::new(&nfo.to_bloom_config()))
             .and_then(fill_filter_with_pwd)
             .and_then(|filter| write_filter(&filter_path, filter)),
         Opt::Add{base_filter, filter_path} =>
@@ -112,9 +111,7 @@ fn main() -> io::Result<()> {
             .and_then(|filter| write_filter(&filter_path, filter)),
         Opt::Statistic{filter_path} => get_statistics(&filter_path),
         Opt::DryRun{nfo, filter_path:_} => {
-            println!("Expected size (in bytes) is {}", BloomBitVec::compute_bitmap_size(
-                    &bloom::ConfigNumRates{items_count:nfo.expected_num_items,
-                                  fp_p:nfo.false_positive_rate}));
+            println!("{}", nfo.to_bloom_config().info());
             Ok(())
         },
     }
@@ -185,7 +182,7 @@ fn read_filter (filter_filename: &PathBuf) -> io::Result<(ExtFile<fs::File>, Blo
     let (mut filter_holder, config_binary) = ExtFile::from_stream(content)?;
     let config: AppConfig = bincode::deserialize(&config_binary).map_err(|_| data_error ("metadata is corrupt or version does not match"))?;
     assert_data_error(config.version == env!("CARGO_PKG_VERSION"), "version in metadata does not match")?;
-    assert_data_error(config.bf_config.len == filter_holder.len(), "length in metadata does not match")?;
+    assert_data_error(config.bf_config.filter_size*8 == filter_holder.len(), "length in metadata does not match")?;
     Ok((filter_holder, config.bf_config))
 }
 
@@ -197,14 +194,16 @@ fn get_statistics (filter_filename: &PathBuf) -> io::Result<()>
     let (_, config_binary) = ExtFile::from_stream(content)?;
     let config: AppConfig = bincode::deserialize(&config_binary).map_err(|_| data_error ("metadata is corrupt or version does not match"))?;
     assert_data_error(config.version == env!("CARGO_PKG_VERSION"), "version in metadata does not match")?;
-    let BloomFilterConfig{k_num, len} = config.bf_config;
+    let &BloomFilterConfig{k_num, filter_size:len} = &config.bf_config;
+    let filter_len = len*8;
     let ones = config.ones;
-    let ones_rate = (ones as f64)/(len as f64);
-    println!("Lenght (in bits): {}", len);
+    let ones_rate = (ones as f64)/(len as f64)/8.;
+    println!("Lenght (in bits): {}", filter_len);
     println!("Number of hashers: {}", k_num);
     println!("Number of ones: {}", ones);
-    println!("False positive rate: {}%",  (100.*ones_rate.powi(k_num as i32)).round());
-    println!("Estimated number of uniq passwords in the filter: {}", -((1. - ones_rate).ln()/(k_num as f64)*(len as f64)).ceil());
+    println!("False positive rate: {:.2}%",  (100.*ones_rate.powi(k_num as i32)));
+    println!("Estimated number of uniq passwords in the filter: {}", -((1. - ones_rate).ln()/(k_num as f64)*(filter_len as f64)).ceil());
+    println!("Original settings were \"{}\"", config.bf_config.info());
     Ok(())
 }
 
@@ -232,7 +231,7 @@ fn write_filter (dst_filename: &PathBuf, filter: BloomBitVec) -> io::Result<()>
 {
     let (mut bitmap, k_num) = filter.bitmap_k_num();
     let config = AppConfig{
-        bf_config: BloomFilterConfig{k_num, len:BloomHolder::len(&mut bitmap)},
+        bf_config: BloomFilterConfig{k_num, filter_size:BloomHolder::len(&mut bitmap)/8},
         version: env!("CARGO_PKG_VERSION").to_string(),
         ones: bitmap.count_ones(),
     };

@@ -10,19 +10,30 @@ extern crate siphasher;
 
 use siphasher::sip::SipHasher13;
 use std::cmp;
-use std::f64;
 use std::hash::{Hash, Hasher};
 use std::{io::{self, Seek, SeekFrom, Read}};
+use std::f64::consts::LN_2;
+use serde;
 
 #[cfg(test)]
 use rand::Rng;
 
-#[derive(Debug)]
-pub struct ConfigNumRates {
-    pub items_count: u64, 
-    pub fp_p: f64,
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct BloomFilterConfig {
+    /// filter size in bytes
+    pub filter_size: u64, 
+    pub k_num: u64,
 }
 
+impl BloomFilterConfig {
+    pub fn info(&self) -> String {
+        format!("Size (in bytes): {}\nNumber of hashers: {}\nExpected fp rate {:.2}% under load below {} items", 
+                self.filter_size, 
+                self.k_num, 
+                0.5f64.powi(self.k_num as i32)*100.,
+                ((self.filter_size as f64)*8./(self.k_num as f64)*LN_2).ceil() as u64)
+    }
+}
 
 pub struct ExtFile <F> {
     f: F,
@@ -189,11 +200,10 @@ where
     /// Create a new bloom filter structure.
     /// bitmap_size is the size in bytes (not bits) that will be allocated in memory
     /// items_count is an estimation of the maximum number of items to store.
-    pub fn new(bitmap_size: u64, items_count: u64) -> Self
+    pub fn new(&BloomFilterConfig{k_num, filter_size}: &BloomFilterConfig) -> Self
     {
-        assert!(bitmap_size > 0 && items_count > 0);
-        let bitmap_bits: u64 = (bitmap_size) * 8;
-        let k_num = Self::optimal_k_num(bitmap_bits, items_count);
+        assert!(k_num > 0 && filter_size > 0);
+        let bitmap_bits: u64 = (filter_size) * 8;
         let bitmap = H::zeros(bitmap_bits as u64);
         let sips = Self::sips_new(); // [Self::sip_new(), Self::sip_new()];
         Self {
@@ -202,15 +212,6 @@ where
             k_num,
             sips,
         }
-    }
-
-
-    /// Create a new bloom filter structure.
-    /// items_count is an estimation of the maximum number of items to store.
-    /// fp_p is the wanted rate of false positives, in ]0.0, 1.0[
-    pub fn new_for_fp_rate(opt: &ConfigNumRates) -> Self {
-        let bitmap_size = Self::compute_bitmap_size(&opt);
-        Bloom::new(bitmap_size, opt.items_count)
     }
 
     /// Record the presence of an item.
@@ -262,24 +263,6 @@ where
         (self.bitmap, self.k_num)
     }
 
-    pub fn optimal_k_num(bitmap_bits: u64, items_count: u64) -> u64 {
-        let m = bitmap_bits as f64;
-        let n = items_count as f64;
-        let k_num = (m / n * f64::ln(2.0f64)).ceil() as u64;
-        cmp::max(k_num, 1)
-    }
-
-    /// Compute a recommended bitmap size for items_count items
-    /// and a fp_p rate of false positives.
-    /// fp_p obviously has to be within the ]0.0, 1.0[ range.
-    pub fn compute_bitmap_size(&ConfigNumRates{items_count, fp_p}: &ConfigNumRates) -> u64 {
-        assert!(items_count > 0);
-        assert!(fp_p > 0.0 && fp_p < 1.0);
-        let log2 = f64::consts::LN_2;
-        let log2_2 = log2 * log2;
-        ((items_count as f64) * f64::ln(fp_p) / (-8.0 * log2_2)).ceil() as u64
-    }
-
 
     fn bloom_hash<T>(&self, hashes: &mut [u64; 2], item: &T, k_i: u64) -> u64
     where
@@ -300,4 +283,22 @@ where
     pub fn sips_new() -> [SipHasher13; 2] {
         [SipHasher13::new_with_keys(0, 1), SipHasher13::new_with_keys(1, 0)]
     }
+}
+
+pub fn optimal_k_num(bitmap_bits: u64, items_count: u64) -> u64 {
+    let m = bitmap_bits as f64;
+    let n = items_count as f64;
+    let k_num = (m / n * f64::ln(2.0f64)).ceil() as u64;
+    cmp::max(k_num, 1)
+}
+
+/// Compute a recommended bitmap size for items_count items
+/// and a fp_p rate of false positives.
+/// fp_p obviously has to be within the ]0.0, 1.0[ range.
+pub fn compute_settings_from_item_fp(items_count: u64, fp_p: f64) -> BloomFilterConfig {
+    assert!(items_count > 0);
+    assert!(fp_p > 0.0 && fp_p < 1.0);
+    let k_num = (-fp_p.log2()).ceil() as u64;
+    let filter_size = (((items_count*k_num) as f64)/8./LN_2).ceil() as u64; 
+    BloomFilterConfig{k_num, filter_size}
 }
