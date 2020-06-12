@@ -9,7 +9,6 @@
 extern crate siphasher;
 
 use siphasher::sip::SipHasher13;
-use std::cmp;
 use std::hash::{Hash, Hasher};
 use std::{io::{self, Seek, SeekFrom, Read}};
 use std::f64::consts::LN_2;
