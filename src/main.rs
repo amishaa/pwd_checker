@@ -101,6 +101,8 @@ enum Opt {
         #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
         filter_path: Option<PathBuf>,
     },
+    /// Calculate settings for the filter based on 2 of size, expected number of items, false
+    /// positive rate
     Calculate {
         #[structopt(flatten)]
         calculate_config: CalculateConfig,
