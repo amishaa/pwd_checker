@@ -307,6 +307,6 @@ pub fn compute_settings_from_size_fp(filter_size: u64, fp_p: f64) -> BloomFilter
 pub fn compute_settings_from_size_items (filter_size: u64, items_count: u64) -> BloomFilterConfig {
     assert!(filter_size > 0);
     assert!(items_count > 0);
-    let k_num = (filter_size as f64 * 8./items_count as f64*LN_2).ceil() as u64;
+    let k_num = 1.max((filter_size as f64 * 8./items_count as f64*LN_2).floor() as u64);
     BloomFilterConfig{k_num, filter_size}
 }
