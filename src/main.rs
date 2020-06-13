@@ -13,7 +13,7 @@ type BloomBitVec = bloom::Bloom<Vec<u8>>;
 struct NewFilterOptions
 {
     /// Set desired size in bytedesired size in bytes
-    #[structopt(short = "-s", long, env = "FILTER_SIZE", default_value = "3462468095")]
+    #[structopt(short = "-s", long, env = "FILTER_SIZE", default_value = "415336708")]
     filter_size: u64,
 
     /// Set desired false positive rate
