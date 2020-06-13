@@ -32,13 +32,21 @@ impl BloomFilterConfig {
                 0.5f64.powi(self.k_num as i32)*100.,
                 ((self.filter_size as f64)*8./(self.k_num as f64)*LN_2).ceil() as u64,
                 if let Some(items_count) = load {
-                    format!("\nWith load {} fp rate will be {:.2}%", items_count, self.estimate_fp_rate(items_count)*100.)
+                    self.info_load (items_count)
                 } else {"".to_string()},
                 if let Some(fp_p) = fp_rate {
-                    let load = self.max_capacity (fp_p);
-                    format!("\nWith load {} fp rate will be {:.2}%", load,  self.estimate_fp_rate(load)*100.)
+                    let items_count = self.max_capacity (fp_p);
+                    self.info_load (items_count)
                 } else {"".to_string()}
                 )
+    }
+
+
+    fn info_load(&self, load: u64) -> String {
+        let fp_percent = self.estimate_fp_rate(load)*100.;
+        format!("\nWith load {} fp rate will be {}%", load,
+                if fp_percent > 0.01 { format!("{:.2}", fp_percent)
+                } else {"<0.01".to_string()})
     }
 
 
