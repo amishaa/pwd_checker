@@ -211,16 +211,11 @@ fn get_statistics (filter_filename: &PathBuf) -> io::Result<()>
     let (_, config_binary) = ExtFile::from_stream(content)?;
     let config: AppConfig = bincode::deserialize(&config_binary).map_err(|_| data_error ("metadata is corrupt or version does not match"))?;
     assert_data_error(config.version == env!("CARGO_PKG_VERSION"), "version in metadata does not match")?;
-    let &BloomFilterConfig{k_num, filter_size:len} = &config.bf_config;
-    let filter_len = len*8;
+    let &BloomFilterConfig{k_num:_, filter_size:len} = &config.bf_config;
     let ones = config.ones;
-    let ones_rate = (ones as f64)/(len as f64)/8.;
-    println!("Lenght (in bits): {}", filter_len);
-    println!("Number of hashers: {}", k_num);
-    println!("Number of ones: {}", ones);
-    println!("False positive rate: {:.2}%",  (100.*ones_rate.powi(k_num as i32)));
-    println!("Estimated number of uniq passwords in the filter: {}", -((1. - ones_rate).ln()/(k_num as f64)*(filter_len as f64)).ceil());
-    println!("Original settings were \"{}\"", config.bf_config.info(None, None));
+    let one_rate = (ones as f64)/(len as f64)/8.;
+    println!("{}", config.bf_config.info(None, None));
+    println!("{}", config.bf_config.info_load(None, Some(one_rate)));
     Ok(())
 }
 

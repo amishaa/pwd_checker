@@ -26,27 +26,42 @@ pub struct BloomFilterConfig {
 
 impl BloomFilterConfig {
     pub fn info(&self, load: Option<u64>, fp_rate: Option<f64>) -> String {
-        format!("Size (in bytes): {}\nNumber of hashers: {}\nExpected fp rate {:.2}% under load below {} items{}{}", 
+        format!("Size (in bytes): {}\nNumber of hashers: {}\nExpected fp rate {} under load below {} items{}{}", 
                 self.filter_size, 
                 self.k_num, 
-                0.5f64.powi(self.k_num as i32)*100.,
+                Self::format_percent(0.5f64.powi(self.k_num as i32)),
                 ((self.filter_size as f64)*8./(self.k_num as f64)*LN_2).ceil() as u64,
                 if let Some(items_count) = load {
-                    self.info_load (items_count)
+                    self.info_load (Some(items_count), None)
                 } else {"".to_string()},
                 if let Some(fp_p) = fp_rate {
                     let items_count = self.max_capacity (fp_p);
-                    self.info_load (items_count)
+                    self.info_load (Some(items_count), None)
                 } else {"".to_string()}
                 )
     }
 
+    fn format_percent(fp: f64) -> String
+    {
+        let fp_percent = fp*100.;
+        if fp_percent > 0.01 {format!("{:.2}%", fp_percent)}
+        else {"<0.01%".to_string()}
+    }
 
-    fn info_load(&self, load: u64) -> String {
-        let fp_percent = self.estimate_fp_rate(load)*100.;
-        format!("\nWith load {} fp rate will be {}%", load,
-                if fp_percent > 0.01 { format!("{:.2}", fp_percent)
-                } else {"<0.01".to_string()})
+    pub fn info_load(&self, load: Option<u64>, one_rate: Option<f64>) -> String {
+        if let Some(load) = load {
+            format!("\nWith load {} fp rate will be {}", load,
+                    Self::format_percent(self.estimate_fp_rate(load))) }
+        else {
+            if let Some(one_rate) = one_rate {
+                let fp = one_rate.powi(self.k_num as i32);
+                let load = -(((1.-one_rate).ln()/(self.k_num as f64)*(self.filter_size as f64)*8.).ceil()) as u64;
+                format!("\nCurrent load is about {}, fp rate {}", load, Self::format_percent(fp))
+            }
+            else 
+            {"".to_string()}
+        }
+
     }
 
 
