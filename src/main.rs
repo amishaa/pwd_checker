@@ -1,7 +1,5 @@
 use std::{fs, io::{self, BufRead}, path::PathBuf};
 use structopt::StructOpt;
-use serde;
-use bincode;
 
 
 mod bloom;
@@ -137,7 +135,7 @@ fn main() -> io::Result<()> {
 
 fn filter_union(input_paths: &Vec<PathBuf>) -> io::Result<BloomBitVec>
 {
-    let mut result: Option<(Vec<u8>, BloomFilterConfig)> = None;
+    let mut result = None;
     for path in input_paths {
         let new_filter = read_filter(&path);
         match new_filter {
@@ -150,12 +148,12 @@ fn filter_union(input_paths: &Vec<PathBuf>) -> io::Result<BloomBitVec>
                     None =>
                     {
                         println!("Use file {:?} as baseline", &path);
-                        result = Some((file.to_vec(), file_filter_config))
+                        result = Some((file.to_vec()?, file_filter_config))
                     },
                     Some((filter, config)) =>
                     {
                         if file_filter_config == *config {
-                            filter.union (&file.to_vec());
+                            filter.union (&file.to_vec()?);
                         }
                         else {
                             eprintln!("File {:?} skipped, incompetible metadata", &path);
@@ -187,7 +185,7 @@ where T: BloomHolder
 fn read_filter_to_mem (filter_filename: &PathBuf) -> io::Result<BloomBitVec>
 {
     let (file_holder, bf_config) = read_filter(filter_filename)?;
-    let holder = file_holder.to_vec();
+    let holder = file_holder.to_vec()?;
     Ok(Bloom::from_bitmap_k_num(holder, bf_config.k_num))
 }
 

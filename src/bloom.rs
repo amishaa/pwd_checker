@@ -124,11 +124,11 @@ where F: Read + Seek
         message
     }
 
-    pub fn to_vec (mut self) -> Vec<u8> {
+    pub fn to_vec (mut self) -> io::Result<Vec<u8>> {
         let mut data = vec![0u8; (self.len() as usize)/8];
         self.f.seek(SeekFrom::Start(self.offset)).unwrap();
         self.f.read_exact(&mut data).unwrap();
-        data
+        Ok(data)
     }
 
     pub fn count_ones (&mut self) -> u64 {
