@@ -198,14 +198,14 @@ fn read_filter(filter_filename: &PathBuf) -> io::Result<(Bloom<ExtFile<fs::File>
 
     let (mut filter_holder, config_binary) = ExtFile::from_stream(content)?;
     let config: AppConfig = bincode::deserialize(&config_binary)
-        .map_err(|_| data_error("metadata is corrupt or version does not match"))?;
+        .map_err(|_| data_error("metadata is corrupt or in wrong format"))?;
     assert_data_error(
         config.version == env!("CARGO_PKG_VERSION"),
-        "version in metadata does not match",
+        "application version in metadata does not match application version",
     )?;
     assert_data_error(
         config.bf_config.filter_size * 8 == filter_holder.len(),
-        "length in metadata does not match",
+        "length in metadata does not match file lenght",
     )?;
     let filter = Bloom::from_bitmap_k_num(filter_holder, config.bf_config.k_num);
     Ok((filter, config))
