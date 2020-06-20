@@ -8,11 +8,11 @@
 
 extern crate siphasher;
 
-use siphasher::sip::SipHasher13;
-use std::hash::{Hash, Hasher};
-use std::{io::{self, Seek, SeekFrom, Read}};
-use std::f64::consts::LN_2;
 use serde;
+use siphasher::sip::SipHasher13;
+use std::f64::consts::LN_2;
+use std::hash::{Hash, Hasher};
+use std::io::{self, Read, Seek, SeekFrom};
 
 #[cfg(test)]
 use rand::Rng;
@@ -20,15 +20,15 @@ use rand::Rng;
 #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BloomFilterConfig {
     /// filter size in bytes
-    pub filter_size: u64, 
+    pub filter_size: u64,
     pub k_num: u64,
 }
 
 impl BloomFilterConfig {
     pub fn info(&self, load: Option<u64>, fp_rate: Option<f64>) -> String {
         format!("Size (in bytes): {}\nNumber of hashers: {}\nExpected fp rate {} under load below {} items{}{}", 
-                self.filter_size, 
-                self.k_num, 
+                self.filter_size,
+                self.k_num,
                 Self::format_percent(0.5f64.powi(self.k_num as i32)),
                 ((self.filter_size as f64)*8./(self.k_num as f64)*LN_2).ceil() as u64,
                 if let Some(items_count) = load {
@@ -41,80 +41,90 @@ impl BloomFilterConfig {
                 )
     }
 
-    fn format_percent(fp: f64) -> String
-    {
-        let fp_percent = fp*100.;
-        if fp_percent > 0.01 {format!("{:.2}%", fp_percent)}
-        else {"<0.01%".to_string()}
+    fn format_percent(fp: f64) -> String {
+        let fp_percent = fp * 100.;
+        if fp_percent > 0.01 {
+            format!("{:.2}%", fp_percent)
+        } else {
+            "<0.01%".to_string()
+        }
     }
 
     pub fn info_load(&self, load: Option<u64>, one_rate: Option<f64>) -> String {
         if let Some(load) = load {
-            format!("\nWith load {} fp rate will be {}", load,
-                    Self::format_percent(self.estimate_fp_rate(load))) }
-        else {
+            format!(
+                "\nWith load {} fp rate will be {}",
+                load,
+                Self::format_percent(self.estimate_fp_rate(load))
+            )
+        } else {
             if let Some(one_rate) = one_rate {
                 let fp = one_rate.powi(self.k_num as i32);
-                let load = -(((1.-one_rate).ln()/(self.k_num as f64)*(self.filter_size as f64)*8.).ceil()) as u64;
-                format!("\nCurrent load is about {}, fp rate {}", load, Self::format_percent(fp))
+                let load =
+                    -(((1. - one_rate).ln() / (self.k_num as f64) * (self.filter_size as f64) * 8.)
+                        .ceil()) as u64;
+                format!(
+                    "\nCurrent load is about {}, fp rate {}",
+                    load,
+                    Self::format_percent(fp)
+                )
+            } else {
+                "".to_string()
             }
-            else 
-            {"".to_string()}
         }
-
     }
 
-
-    pub fn max_capacity (&self, fp_rate: f64) -> u64 
-    {
-        let one_rate = fp_rate.powf(1./self.k_num as f64);
-        ((1. - one_rate).ln()/self.k_num as f64*self.filter_size as f64 * -8.).floor() as u64
+    pub fn max_capacity(&self, fp_rate: f64) -> u64 {
+        let one_rate = fp_rate.powf(1. / self.k_num as f64);
+        ((1. - one_rate).ln() / self.k_num as f64 * self.filter_size as f64 * -8.).floor() as u64
     }
 
-    pub fn estimate_fp_rate (&self, items_count: u64) -> f64
-    {
-        let zero_rate = (-((self.k_num*items_count) as f64)/(self.filter_size as f64)/8.).exp();
+    pub fn estimate_fp_rate(&self, items_count: u64) -> f64 {
+        let zero_rate =
+            (-((self.k_num * items_count) as f64) / (self.filter_size as f64) / 8.).exp();
         (1. - zero_rate).powi(self.k_num as i32)
     }
 }
 
-pub struct ExtFile <F> {
+pub struct ExtFile<F> {
     f: F,
     offset: u64,
 }
 
-
-impl <F> ExtFile<F> 
-where F: Read + Seek
+impl<F> ExtFile<F>
+where
+    F: Read + Seek,
 {
-    fn read (&mut self, w: usize) -> u8 {
-        let mut buf = [0u8;1];
-        self.f.seek(SeekFrom::Start(w as u64 + self.offset)).unwrap();
+    fn read(&mut self, w: usize) -> u8 {
+        let mut buf = [0u8; 1];
+        self.f
+            .seek(SeekFrom::Start(w as u64 + self.offset))
+            .unwrap();
         self.f.read(&mut buf).unwrap();
         buf[0]
     }
 
-    fn len(&mut self) -> u64 
-    {
-         (self.f.seek(SeekFrom::End(0)).unwrap() - self.offset)*8
+    fn len(&mut self) -> u64 {
+        (self.f.seek(SeekFrom::End(0)).unwrap() - self.offset) * 8
     }
 
-    pub fn from_stream (mut f:F) -> io::Result<(Self, Vec<u8>)>
-    {
+    pub fn from_stream(mut f: F) -> io::Result<(Self, Vec<u8>)> {
         f.seek(SeekFrom::Start(0)).unwrap();
         let mut buf = [0u8; 8];
         f.read_exact(&mut buf)?;
-        let offset:u64 = u64::from_be_bytes(buf);
-        if offset < 8 || offset >= 1024{
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "metadata is corrupt"))
+        let offset: u64 = u64::from_be_bytes(buf);
+        if offset < 8 || offset >= 1024 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "metadata is corrupt",
+            ));
         }
-        let mut metadata = vec![0u8; offset as usize -8];
+        let mut metadata = vec![0u8; offset as usize - 8];
         f.read_exact(&mut metadata)?;
-        Ok((ExtFile{f, offset}, metadata))
+        Ok((ExtFile { f, offset }, metadata))
     }
 
-    pub fn to_stream (metadata: Vec<u8>, bitmap: Vec<u8>) -> Vec<u8>
-    {
+    pub fn to_stream(metadata: Vec<u8>, bitmap: Vec<u8>) -> Vec<u8> {
         let len_prefix: u64 = metadata.len() as u64 + 8u64;
         assert!(len_prefix < 1024);
         let mut message: Vec<u8> = vec![];
@@ -124,18 +134,18 @@ where F: Read + Seek
         message
     }
 
-    pub fn to_vec (mut self) -> io::Result<Vec<u8>> {
-        let mut data = vec![0u8; (self.len() as usize)/8];
+    pub fn to_vec(mut self) -> io::Result<Vec<u8>> {
+        let mut data = vec![0u8; (self.len() as usize) / 8];
         self.f.seek(SeekFrom::Start(self.offset)).unwrap();
         self.f.read_exact(&mut data).unwrap();
         Ok(data)
     }
 
-    pub fn count_ones (&mut self) -> u64 {
+    pub fn count_ones(&mut self) -> u64 {
         self.f.seek(SeekFrom::Start(self.offset)).unwrap();
         let mut result = 0;
-        let mut buf = [0u8;1];
-        while self.f.read(&mut buf).unwrap() > 0{
+        let mut buf = [0u8; 1];
+        while self.f.read(&mut buf).unwrap() > 0 {
             result += buf[0].count_ones() as u64;
         }
         result
@@ -144,83 +154,74 @@ where F: Read + Seek
 
 pub trait BloomHolder {
     // get index-th bit
-    fn get (&mut self, index: u64) -> Option<bool>;
+    fn get(&mut self, index: u64) -> Option<bool>;
     // size in bits, not bytes
-    fn len (&mut self) -> u64;
-    fn count_ones (&mut self) -> u64;
+    fn len(&mut self) -> u64;
+    fn count_ones(&mut self) -> u64;
 }
 
-
-pub trait BloomHolderMut : BloomHolder {
-    fn set_true (&mut self, index: u64);
+pub trait BloomHolderMut: BloomHolder {
+    fn set_true(&mut self, index: u64);
     // size in bits, not bytes
-    fn zeros (size: u64) -> Self;
-    fn union (&mut self, other: &[u8]);
+    fn zeros(size: u64) -> Self;
+    fn union(&mut self, other: &[u8]);
 }
 
-
-fn get_block_offset (index: u64) -> (usize, usize){
-    ((index/8) as usize, (7-(index%8)) as usize)
+fn get_block_offset(index: u64) -> (usize, usize) {
+    ((index / 8) as usize, (7 - (index % 8)) as usize)
 }
 
 impl BloomHolder for Vec<u8> {
-    fn get (&mut self, index: u64) -> Option<bool>
-    {
+    fn get(&mut self, index: u64) -> Option<bool> {
         let (w, b) = get_block_offset(index);
         <[u8]>::get(&self, w as usize).map(|&val| val & (1 << b) != 0)
     }
 
-    fn len(&mut self) -> u64
-    {
-        (Vec::<u8>::len(self)*8) as u64
+    fn len(&mut self) -> u64 {
+        (Vec::<u8>::len(self) * 8) as u64
     }
 
-    fn count_ones (&mut self) -> u64 {
+    fn count_ones(&mut self) -> u64 {
         self.iter().map(|x| x.count_ones() as u64).sum()
     }
 }
 
 impl BloomHolderMut for Vec<u8> {
-    fn set_true (&mut self, index: u64)
-    {
+    fn set_true(&mut self, index: u64) {
         let (w, b) = get_block_offset(index);
         let val = self[w] | 1 << b;
         self[w] = val;
     }
 
-    fn zeros(size: u64) -> Self
-    {
-        assert!(size%8 == 0);
-        vec![0; (size/8) as usize]
+    fn zeros(size: u64) -> Self {
+        assert!(size % 8 == 0);
+        vec![0; (size / 8) as usize]
     }
 
-    fn union (&mut self, other: &[u8])
-    {
+    fn union(&mut self, other: &[u8]) {
         assert!(Vec::<u8>::len(self) == other.len());
-        self.iter_mut().zip(other).for_each(|(a,b)| *a|= b);
+        self.iter_mut().zip(other).for_each(|(a, b)| *a |= b);
     }
 }
 
-impl <F> BloomHolder for ExtFile <F> 
-where F: Read + Seek
+impl<F> BloomHolder for ExtFile<F>
+where
+    F: Read + Seek,
 {
-    fn get (&mut self, index: u64) -> Option<bool>
-    {
+    fn get(&mut self, index: u64) -> Option<bool> {
         if index > self.len() {
             return None;
         }
-        let (w,b) = get_block_offset(index);
+        let (w, b) = get_block_offset(index);
         let val = self.read(w);
-        Some(val & (1<<b) != 0)
+        Some(val & (1 << b) != 0)
     }
-    
-    fn len (&mut self) -> u64
-    {
+
+    fn len(&mut self) -> u64 {
         ExtFile::len(self)
     }
 
-    fn count_ones (&mut self) -> u64
-    {
+    fn count_ones(&mut self) -> u64 {
         ExtFile::count_ones(self)
     }
 }
@@ -228,7 +229,7 @@ where F: Read + Seek
 /// Bloom filter structure
 pub struct Bloom<T>
 where
-    T: BloomHolder
+    T: BloomHolder,
 {
     bitmap: T,
     bitmap_bits: u64,
@@ -236,15 +237,14 @@ where
     sips: [SipHasher13; 2],
 }
 
-impl <H> Bloom <H>
+impl<H> Bloom<H>
 where
-    H: BloomHolderMut
+    H: BloomHolderMut,
 {
     /// Create a new bloom filter structure.
     /// bitmap_size is the size in bytes (not bits) that will be allocated in memory
     /// items_count is an estimation of the maximum number of items to store.
-    pub fn new(&BloomFilterConfig{k_num, filter_size}: &BloomFilterConfig) -> Self
-    {
+    pub fn new(&BloomFilterConfig { k_num, filter_size }: &BloomFilterConfig) -> Self {
         assert!(k_num > 0 && filter_size > 0);
         let bitmap_bits: u64 = (filter_size) * 8;
         let bitmap = H::zeros(bitmap_bits as u64);
@@ -268,15 +268,13 @@ where
             self.bitmap.set_true(bit_offset);
         }
     }
-
 }
 
 impl<H> Bloom<H>
 where
-    H: BloomHolder
+    H: BloomHolder,
 {
-    pub fn from_bitmap_k_num (mut bitmap: H, k_num: u64) -> Self
-    {
+    pub fn from_bitmap_k_num(mut bitmap: H, k_num: u64) -> Self {
         let bitmap_bits = bitmap.len();
         Self {
             bitmap,
@@ -301,11 +299,10 @@ where
         true
     }
 
-    /// Return the bitmap and k_num 
+    /// Return the bitmap and k_num
     pub fn bitmap_k_num(self) -> (H, u64) {
         (self.bitmap, self.k_num)
     }
-
 
     fn bloom_hash<T>(&self, hashes: &mut [u64; 2], item: &T, k_i: u64) -> u64
     where
@@ -322,18 +319,18 @@ where
         }
     }
 
-
     pub fn sips_new() -> [SipHasher13; 2] {
-        [SipHasher13::new_with_keys(0, 1), SipHasher13::new_with_keys(1, 0)]
+        [
+            SipHasher13::new_with_keys(0, 1),
+            SipHasher13::new_with_keys(1, 0),
+        ]
     }
 }
 
-fn compute_size_from_items_k_num_fp (items_count: u64, k_num: u64, fp_p: f64) -> u64
-{
-    let ones_rate = fp_p.powf(1./k_num as f64);
-    (items_count as f64 * k_num as f64 / -8. /( (1. - ones_rate).ln()) ).ceil() as u64
+fn compute_size_from_items_k_num_fp(items_count: u64, k_num: u64, fp_p: f64) -> u64 {
+    let ones_rate = fp_p.powf(1. / k_num as f64);
+    (items_count as f64 * k_num as f64 / -8. / ((1. - ones_rate).ln())).ceil() as u64
 }
-
 
 /// Compute a recommended bitmap size for items_count items
 /// and a fp_p rate of false positives.
@@ -341,27 +338,69 @@ fn compute_size_from_items_k_num_fp (items_count: u64, k_num: u64, fp_p: f64) ->
 pub fn compute_settings_from_items_fp(items_count: u64, fp_p: f64) -> BloomFilterConfig {
     assert!(items_count > 0);
     assert!(fp_p > 0.0 && fp_p < 1.0);
-    let k_num_vars = [(-fp_p.log2()).ceil() as u64, 1.max((-fp_p.log2()).floor() as u64)];
-    let (filter_size, k_num) = k_num_vars.iter().map(|&k_num_var| (compute_size_from_items_k_num_fp(items_count, k_num_var, fp_p), k_num_var)).min().unwrap();
-    BloomFilterConfig{k_num, filter_size}
+    let k_num_vars = [
+        (-fp_p.log2()).ceil() as u64,
+        1.max((-fp_p.log2()).floor() as u64),
+    ];
+    let (filter_size, k_num) = k_num_vars
+        .iter()
+        .map(|&k_num_var| {
+            (
+                compute_size_from_items_k_num_fp(items_count, k_num_var, fp_p),
+                k_num_var,
+            )
+        })
+        .min()
+        .unwrap();
+    BloomFilterConfig { k_num, filter_size }
 }
 
 /// Compute a recommended settings for size in bytes and false positive rate
 pub fn compute_settings_from_size_fp(filter_size: u64, fp_p: f64) -> BloomFilterConfig {
     assert!(filter_size > 0);
     assert!(fp_p > 0.0 && fp_p < 1.0);
-    let k_num_vars = [(-fp_p.log2()).ceil() as u64, 1.max((-fp_p.log2()).floor() as u64)];
-    let (_, k_num) = k_num_vars.iter().map(|&k_num_var| (BloomFilterConfig{k_num: k_num_var, filter_size}.max_capacity(fp_p), k_num_var)).max().unwrap();
-    BloomFilterConfig{k_num, filter_size}
+    let k_num_vars = [
+        (-fp_p.log2()).ceil() as u64,
+        1.max((-fp_p.log2()).floor() as u64),
+    ];
+    let (_, k_num) = k_num_vars
+        .iter()
+        .map(|&k_num_var| {
+            (
+                BloomFilterConfig {
+                    k_num: k_num_var,
+                    filter_size,
+                }
+                .max_capacity(fp_p),
+                k_num_var,
+            )
+        })
+        .max()
+        .unwrap();
+    BloomFilterConfig { k_num, filter_size }
 }
 
 /// Compute a recommended settings for size in bytes and number of item
-pub fn compute_settings_from_size_items (filter_size: u64, items_count: u64) -> BloomFilterConfig {
+pub fn compute_settings_from_size_items(filter_size: u64, items_count: u64) -> BloomFilterConfig {
     assert!(filter_size > 0);
     assert!(items_count > 0);
-    let k_num_vars = [(filter_size as f64*8./items_count as f64*LN_2).ceil() as u64, 1.max((filter_size as f64 * 8./items_count as f64*LN_2).floor() as u64)];
-    let (_, k_num) = k_num_vars.iter().map(|&k_num_var| (BloomFilterConfig{k_num: k_num_var, filter_size}
-                                                         .estimate_fp_rate(items_count), k_num_var))
-          .min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
-    BloomFilterConfig{k_num, filter_size}
+    let k_num_vars = [
+        (filter_size as f64 * 8. / items_count as f64 * LN_2).ceil() as u64,
+        1.max((filter_size as f64 * 8. / items_count as f64 * LN_2).floor() as u64),
+    ];
+    let (_, k_num) = k_num_vars
+        .iter()
+        .map(|&k_num_var| {
+            (
+                BloomFilterConfig {
+                    k_num: k_num_var,
+                    filter_size,
+                }
+                .estimate_fp_rate(items_count),
+                k_num_var,
+            )
+        })
+        .min_by(|a, b| a.partial_cmp(b).unwrap())
+        .unwrap();
+    BloomFilterConfig { k_num, filter_size }
 }
