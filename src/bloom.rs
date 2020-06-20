@@ -268,6 +268,12 @@ where
             self.bitmap.set_true(bit_offset);
         }
     }
+
+    pub fn union(&mut self, other: Bloom<Vec<u8>>) {
+        assert!(other.k_num == self.k_num);
+        assert!(other.bitmap_bits == self.bitmap_bits);
+        self.bitmap.union(&other.bitmap);
+    }
 }
 
 impl<H> Bloom<H>
@@ -403,4 +409,13 @@ pub fn compute_settings_from_size_items(filter_size: u64, items_count: u64) -> B
         .min_by(|a, b| a.partial_cmp(b).unwrap())
         .unwrap();
     BloomFilterConfig { k_num, filter_size }
+}
+
+impl<F> Bloom<ExtFile<F>>
+where
+    F: Read + Seek,
+{
+    pub fn to_mem(self) -> io::Result<Bloom<Vec<u8>>> {
+        Ok(Bloom::from_bitmap_k_num(self.bitmap.to_vec()?, self.k_num))
+    }
 }

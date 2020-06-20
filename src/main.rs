@@ -6,7 +6,7 @@ use std::{
 use structopt::StructOpt;
 
 mod bloom;
-use bloom::{Bloom, BloomFilterConfig, BloomHolder, BloomHolderMut, ExtFile};
+use bloom::{Bloom, BloomFilterConfig, BloomHolder, ExtFile};
 
 type BloomBitVec = bloom::Bloom<Vec<u8>>;
 
@@ -113,7 +113,9 @@ struct AppConfig {
 fn main() -> io::Result<()> {
     let opt = Opt::from_args();
     match &opt {
-        Opt::Check { filter_path } => read_filter_to_mem(filter_path).and_then(check_pwd_filter),
+        Opt::Check { filter_path } => {
+            read_filter(filter_path).and_then(|(filter, _)| check_pwd_filter(filter))
+        }
         Opt::Create {
             filter_path,
             nfo,
@@ -129,14 +131,16 @@ fn main() -> io::Result<()> {
         Opt::Add {
             base_filter,
             filter_path,
-        } => read_filter_to_mem(base_filter)
-            .and_then(fill_filter_with_pwd)
+        } => read_filter(base_filter)
+            .and_then(|(filter, _)| fill_filter_with_pwd(filter.to_mem()?))
             .and_then(|filter| write_filter(filter_path, filter)),
         Opt::Union {
             filter_path,
             input_paths,
         } => filter_union(input_paths).and_then(|filter| write_filter(filter_path, filter)),
-        Opt::Info { filter_path } => get_statistics(filter_path),
+        Opt::Info { filter_path } => {
+            read_filter(filter_path).map(|(_, config)| get_statistics(config))
+        }
         Opt::Calculate { calculate_config } => {
             calculate_optimal(calculate_config).and_then(|config| {
                 print_bloom_config(
@@ -157,14 +161,14 @@ fn filter_union(input_paths: &Vec<PathBuf>) -> io::Result<BloomBitVec> {
             Err(e) => {
                 eprintln!("File {:?} skipped, read/parsing error: {}", &path, e);
             }
-            Ok((file, file_filter_config)) => match &mut result {
+            Ok((new_filter, new_filter_config)) => match &mut result {
                 None => {
                     println!("Use file {:?} as baseline", &path);
-                    result = Some((file.to_vec()?, file_filter_config))
+                    result = Some((new_filter.to_mem()?, new_filter_config.bf_config))
                 }
-                Some((filter, config)) => {
-                    if file_filter_config == *config {
-                        filter.union(&file.to_vec()?);
+                Some((filter, bf_config)) => {
+                    if new_filter_config.bf_config == *bf_config {
+                        filter.union(new_filter.to_mem()?);
                     } else {
                         eprintln!("File {:?} skipped, incompetible metadata", &path);
                     }
@@ -173,7 +177,7 @@ fn filter_union(input_paths: &Vec<PathBuf>) -> io::Result<BloomBitVec> {
         }
     }
     match result {
-        Some((holder, bf_config)) => Ok(BloomBitVec::from_bitmap_k_num(holder, bf_config.k_num)),
+        Some((filter, _bf_config)) => Ok(filter),
         None => Err(data_error("No valid files on input")),
     }
 }
@@ -189,13 +193,7 @@ where
     Ok(())
 }
 
-fn read_filter_to_mem(filter_filename: &PathBuf) -> io::Result<BloomBitVec> {
-    let (file_holder, bf_config) = read_filter(filter_filename)?;
-    let holder = file_holder.to_vec()?;
-    Ok(Bloom::from_bitmap_k_num(holder, bf_config.k_num))
-}
-
-fn read_filter(filter_filename: &PathBuf) -> io::Result<(ExtFile<fs::File>, BloomFilterConfig)> {
+fn read_filter(filter_filename: &PathBuf) -> io::Result<(Bloom<ExtFile<fs::File>>, AppConfig)> {
     let content = fs::File::open(filter_filename)?;
 
     let (mut filter_holder, config_binary) = ExtFile::from_stream(content)?;
@@ -209,19 +207,11 @@ fn read_filter(filter_filename: &PathBuf) -> io::Result<(ExtFile<fs::File>, Bloo
         config.bf_config.filter_size * 8 == filter_holder.len(),
         "length in metadata does not match",
     )?;
-    Ok((filter_holder, config.bf_config))
+    let filter = Bloom::from_bitmap_k_num(filter_holder, config.bf_config.k_num);
+    Ok((filter, config))
 }
 
-fn get_statistics(filter_filename: &PathBuf) -> io::Result<()> {
-    let content = fs::File::open(filter_filename)?;
-
-    let (_, config_binary) = ExtFile::from_stream(content)?;
-    let config: AppConfig = bincode::deserialize(&config_binary)
-        .map_err(|_| data_error("metadata is corrupt or version does not match"))?;
-    assert_data_error(
-        config.version == env!("CARGO_PKG_VERSION"),
-        "version in metadata does not match",
-    )?;
+fn get_statistics(config: AppConfig) {
     let &BloomFilterConfig {
         k_num: _,
         filter_size: len,
@@ -230,7 +220,6 @@ fn get_statistics(filter_filename: &PathBuf) -> io::Result<()> {
     let one_rate = (ones as f64) / (len as f64) / 8.;
     println!("{}", config.bf_config.info(None, None));
     println!("{}", config.bf_config.info_load(None, Some(one_rate)));
-    Ok(())
 }
 
 fn fill_filter_with_pwd<T>(mut filter: bloom::Bloom<T>) -> io::Result<Bloom<T>>
