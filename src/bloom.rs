@@ -99,8 +99,8 @@ where
         buf[0]
     }
 
-    fn len(&mut self) -> u64 {
-        (self.f.seek(SeekFrom::End(0)).unwrap() - self.offset) * 8
+    fn size(&mut self) -> u64 {
+        self.f.seek(SeekFrom::End(0)).unwrap() - self.offset
     }
 
     pub fn from_stream(mut f: F) -> io::Result<(Self, Vec<u8>)> {
@@ -129,21 +129,11 @@ where
         message
     }
 
-    pub fn to_vec(mut self) -> io::Result<Vec<u8>> {
-        let mut data = vec![0u8; (self.len() as usize) / 8];
+    pub fn to_vec(&mut self) -> io::Result<Vec<u8>> {
+        let mut data = vec![0u8; self.size() as usize];
         self.f.seek(SeekFrom::Start(self.offset)).unwrap();
         self.f.read_exact(&mut data).unwrap();
         Ok(data)
-    }
-
-    pub fn count_ones(&mut self) -> u64 {
-        self.f.seek(SeekFrom::Start(self.offset)).unwrap();
-        let mut result = 0;
-        let mut buf = [0u8; 1];
-        while self.f.read(&mut buf).unwrap() > 0 {
-            result += buf[0].count_ones() as u64;
-        }
-        result
     }
 
     fn reset_seek(&mut self) {
@@ -223,11 +213,11 @@ where
     }
 
     fn len(&mut self) -> u64 {
-        ExtFile::len(self)
+        ExtFile::size(self) * 8
     }
 
     fn count_ones(&mut self) -> u64 {
-        ExtFile::count_ones(self)
+        self.to_vec().unwrap().count_ones()
     }
 }
 
@@ -424,7 +414,7 @@ impl<F> Bloom<ExtFile<F>>
 where
     F: Read + Seek,
 {
-    pub fn to_mem(self) -> io::Result<Bloom<Vec<u8>>> {
+    pub fn to_mem(mut self) -> io::Result<Bloom<Vec<u8>>> {
         Ok(Bloom::from_bitmap_k_num(self.bitmap.to_vec()?, self.k_num))
     }
 }
