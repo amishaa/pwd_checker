@@ -150,6 +150,10 @@ where
         }
         result
     }
+
+    fn reset_seek(&mut self) {
+        self.f.seek(SeekFrom::Start(self.offset)).unwrap();
+    }
 }
 
 pub trait BloomHolder {
@@ -164,7 +168,9 @@ pub trait BloomHolderMut: BloomHolder {
     fn set_true(&mut self, index: u64);
     // size in bits, not bytes
     fn zeros(size: u64) -> Self;
-    fn union(&mut self, other: &[u8]);
+    fn union<H>(&mut self, other: H)
+    where
+        H: Read;
 }
 
 fn get_block_offset(index: u64) -> (usize, usize) {
@@ -198,9 +204,13 @@ impl BloomHolderMut for Vec<u8> {
         vec![0; (size / 8) as usize]
     }
 
-    fn union(&mut self, other: &[u8]) {
-        assert!(Vec::<u8>::len(self) == other.len());
-        self.iter_mut().zip(other).for_each(|(a, b)| *a |= b);
+    fn union<H>(&mut self, other: H)
+    where
+        H: Read,
+    {
+        self.iter_mut()
+            .zip(other.bytes())
+            .for_each(|(a, b)| *a |= b.unwrap());
     }
 }
 
@@ -269,10 +279,14 @@ where
         }
     }
 
-    pub fn union(&mut self, other: Bloom<Vec<u8>>) {
+    pub fn union<F>(&mut self, mut other: Bloom<ExtFile<F>>)
+    where
+        F: Read + Seek,
+    {
         assert!(other.k_num == self.k_num);
         assert!(other.bitmap_bits == self.bitmap_bits);
-        self.bitmap.union(&other.bitmap);
+        other.bitmap.reset_seek();
+        self.bitmap.union(other.bitmap.f);
     }
 }
 

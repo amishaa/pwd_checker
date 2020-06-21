@@ -168,7 +168,7 @@ fn filter_union(input_paths: &Vec<PathBuf>) -> io::Result<BloomBitVec> {
                 }
                 Some((filter, bf_config)) => {
                     if new_filter_config.bf_config == *bf_config {
-                        filter.union(new_filter.to_mem()?);
+                        filter.union(new_filter);
                     } else {
                         eprintln!("File {:?} skipped, incompetible metadata", &path);
                     }
