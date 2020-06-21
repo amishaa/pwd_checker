@@ -1,21 +1,9 @@
-// (C)opyleft 2013-2019 Frank Denis
+// Based on Bloom filter for Rust (C)opyleft 2013-2019 Frank Denis
 
-//! Bloom filter for Rust
-//!
-//! This is a simple but fast Bloom filter implementation, that requires only
-//! 2 hash functions, generated with SipHash-1-3 using randomized keys.
-//!
-
-extern crate siphasher;
-
-use serde;
 use siphasher::sip::SipHasher13;
 use std::f64::consts::LN_2;
 use std::hash::{Hash, Hasher};
-use std::io::{self, Read, Seek, SeekFrom};
-
-#[cfg(test)]
-use rand::Rng;
+use std::io::{self, Read, Seek, SeekFrom, Write};
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BloomFilterConfig {
@@ -119,14 +107,16 @@ where
         Ok((ExtFile { f, offset }, metadata))
     }
 
-    pub fn to_stream(metadata: Vec<u8>, bitmap: Vec<u8>) -> Vec<u8> {
+    pub fn to_stream<H>(metadata: Vec<u8>, bitmap: Vec<u8>, mut stream: H) -> io::Result<()>
+    where
+        H: Write,
+    {
         let len_prefix: u64 = metadata.len() as u64 + 8u64;
         assert!(len_prefix < 1024);
-        let mut message: Vec<u8> = vec![];
-        message.extend(len_prefix.to_be_bytes().to_vec());
-        message.extend(metadata);
-        message.extend(bitmap);
-        message
+        stream.write_all(&len_prefix.to_be_bytes().to_vec())?;
+        stream.write_all(&metadata)?;
+        stream.write_all(&bitmap)?;
+        Ok(())
     }
 
     pub fn to_vec(&mut self) -> io::Result<Vec<u8>> {

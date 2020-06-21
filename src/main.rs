@@ -1,5 +1,5 @@
 use std::{
-    fs,
+    fs::File,
     io::{self, BufRead},
     path::PathBuf,
 };
@@ -193,8 +193,8 @@ where
     Ok(())
 }
 
-fn read_filter(filter_filename: &PathBuf) -> io::Result<(Bloom<ExtFile<fs::File>>, AppConfig)> {
-    let content = fs::File::open(filter_filename)?;
+fn read_filter(filter_filename: &PathBuf) -> io::Result<(Bloom<ExtFile<File>>, AppConfig)> {
+    let content = File::open(filter_filename)?;
 
     let (mut filter_holder, config_binary) = ExtFile::from_stream(content)?;
     let config: AppConfig = bincode::deserialize(&config_binary)
@@ -250,11 +250,8 @@ fn write_filter(dst_filename: &PathBuf, filter: BloomBitVec) -> io::Result<()> {
         ones: bitmap.count_ones(),
     };
     let encoded_config = bincode::serialize(&config).unwrap();
-    fs::write(
-        dst_filename,
-        ExtFile::<fs::File>::to_stream(encoded_config, bitmap),
-    )?;
-    Ok(())
+    let dst_file = File::create(dst_filename)?;
+    ExtFile::<File>::to_stream(encoded_config, bitmap, dst_file)
 }
 
 fn data_error(message: &str) -> io::Error {
