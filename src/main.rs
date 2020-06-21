@@ -286,34 +286,18 @@ fn calculate_optimal(
         items_number,
     }: &CalculateConfig,
 ) -> io::Result<BloomFilterConfig> {
-    let passed_args = vec![
-        filter_size.is_some(),
-        false_positive.is_some(),
-        items_number.is_some(),
-    ]
-    .into_iter()
-    .filter(|&x| x)
-    .count();
-    assert_data_error(
-        passed_args == 2,
-        &format!(
-            "Two and only two items should be specified, but {} specified",
-            passed_args
-        ),
-    )?;
-    if let Some(size) = filter_size {
-        if let Some(fp_rate) = false_positive {
-            Ok(bloom::compute_settings_from_size_fp(size, fp_rate))
-        } else {
-            Ok(bloom::compute_settings_from_size_items(
-                size,
-                items_number.unwrap(),
-            ))
+    match (filter_size, false_positive, items_number) {
+        (Some(size), Some(fp_p), None) => Ok(bloom::compute_settings_from_size_fp(size, fp_p)),
+        (Some(size), None, Some(items)) => Ok(bloom::compute_settings_from_size_items(size, items)),
+        (None, Some(fp_p), Some(items)) => Ok(bloom::compute_settings_from_items_fp(items, fp_p)),
+        (_, _, _) => {
+            let passed_args: u32 = filter_size.map_or_else(|| 0, |_| 1)
+                + false_positive.map_or_else(|| 0, |_| 1)
+                + items_number.map_or_else(|| 0, |_| 1);
+            Err(data_error(&format!(
+                "Two and only two items should be specified, but {} specified",
+                passed_args
+            )))
         }
-    } else {
-        Ok(bloom::compute_settings_from_items_fp(
-            items_number.unwrap(),
-            false_positive.unwrap(),
-        ))
     }
 }
