@@ -17,7 +17,7 @@ use std::io::{self, Read, Seek, SeekFrom};
 #[cfg(test)]
 use rand::Rng;
 
-#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BloomFilterConfig {
     /// filter size in bytes
     pub filter_size: u64,
@@ -31,13 +31,8 @@ impl BloomFilterConfig {
                 self.k_num,
                 Self::format_percent(0.5f64.powi(self.k_num as i32)),
                 ((self.filter_size as f64)*8./(self.k_num as f64)*LN_2).ceil() as u64,
-                if let Some(items_count) = load {
-                    self.info_load (Some(items_count), None)
-                } else {"".to_string()},
-                if let Some(fp_p) = fp_rate {
-                    let items_count = self.max_capacity (fp_p);
-                    self.info_load (Some(items_count), None)
-                } else {"".to_string()}
+                self.info_load(load, None),
+                self.info_load(fp_rate.map(|x| self.max_capacity(x)), None),
                 )
     }
 
