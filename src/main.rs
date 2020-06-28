@@ -11,7 +11,8 @@ use bloom::{Bloom, BloomFilterConfig, BloomHolder, ExtFile};
 type BloomBitVec = bloom::Bloom<Vec<u8>>;
 
 #[derive(StructOpt, Debug)]
-struct NewFilterOptions {
+struct NewFilterOptions
+{
     /// Set desired size in bytedesired size in bytes
     #[structopt(short = "-s", long, env = "FILTER_SIZE", default_value = "415336708")]
     filter_size: u64,
@@ -21,8 +22,10 @@ struct NewFilterOptions {
     k_num: u64,
 }
 
-impl NewFilterOptions {
-    fn to_bloom_config(&self) -> BloomFilterConfig {
+impl NewFilterOptions
+{
+    fn to_bloom_config(&self) -> BloomFilterConfig
+    {
         BloomFilterConfig {
             filter_size: self.filter_size,
             k_num: self.k_num,
@@ -31,7 +34,8 @@ impl NewFilterOptions {
 }
 
 #[derive(StructOpt, Debug)]
-struct CalculateConfig {
+struct CalculateConfig
+{
     /// Set desired size in bytedesired size in bytes
     #[structopt(short = "-s", long, env = "FILTER_SIZE")]
     filter_size: Option<u64>,
@@ -47,11 +51,13 @@ struct CalculateConfig {
 
 #[derive(StructOpt, Debug)]
 /// Check if password present or not in the list using pre-processed bloom filter.
-enum Opt {
+enum Opt
+{
     /// Create a new bloom filter with desired parameters and fill it with passwords from stdin
     ///
     /// We normalize passwords before putting them into the filter
-    Create {
+    Create
+    {
         #[structopt(flatten)]
         nfo: NewFilterOptions,
 
@@ -64,13 +70,15 @@ enum Opt {
         dry_run: bool,
     },
     /// Check if password is present in the filter
-    Check {
+    Check
+    {
         /// File with bloom filter
         #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
         filter_path: PathBuf,
     },
     /// Add new passwords to the filter
-    Add {
+    Add
+    {
         /// File with base bloom filter
         #[structopt(short, long, parse(from_os_str))]
         base_filter: PathBuf,
@@ -80,7 +88,8 @@ enum Opt {
         filter_path: PathBuf,
     },
     /// Union, settings from first valid filter will be pined, all remaining will be dropped
-    Union {
+    Union
+    {
         /// Input files
         #[structopt(short, long, parse(from_os_str))]
         input_paths: Vec<PathBuf>,
@@ -90,27 +99,31 @@ enum Opt {
         filter_path: PathBuf,
     },
     /// Print statistic of the filter
-    Info {
+    Info
+    {
         ///Input file
         #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
         filter_path: PathBuf,
     },
     /// Calculate settings for the filter based on 2 of size, expected number of items, false
     /// positive rate
-    Calculate {
+    Calculate
+    {
         #[structopt(flatten)]
         calculate_config: CalculateConfig,
     },
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
-struct AppConfig {
+struct AppConfig
+{
     version: String,
     bf_config: BloomFilterConfig,
     ones: u64,
 }
 
-fn main() -> io::Result<()> {
+fn main() -> io::Result<()>
+{
     let opt = Opt::from_args();
     match &opt {
         Opt::Check { filter_path } => {
@@ -153,7 +166,8 @@ fn main() -> io::Result<()> {
     }
 }
 
-fn filter_union(input_paths: &Vec<PathBuf>) -> io::Result<BloomBitVec> {
+fn filter_union(input_paths: &Vec<PathBuf>) -> io::Result<BloomBitVec>
+{
     let mut result = None;
     for path in input_paths {
         let new_filter = read_filter(&path);
@@ -193,7 +207,8 @@ where
     Ok(())
 }
 
-fn read_filter(filter_filename: &PathBuf) -> io::Result<(Bloom<ExtFile<File>>, AppConfig)> {
+fn read_filter(filter_filename: &PathBuf) -> io::Result<(Bloom<ExtFile<File>>, AppConfig)>
+{
     let content = File::open(filter_filename)?;
 
     let (mut filter_holder, config_binary) = ExtFile::from_stream(content)?;
@@ -211,7 +226,8 @@ fn read_filter(filter_filename: &PathBuf) -> io::Result<(Bloom<ExtFile<File>>, A
     Ok((filter, config))
 }
 
-fn get_statistics(config: AppConfig) {
+fn get_statistics(config: AppConfig)
+{
     let &BloomFilterConfig {
         k_num: _,
         filter_size: len,
@@ -239,7 +255,8 @@ where
     filter.check(&normalize_string(pwd))
 }
 
-fn write_filter(dst_filename: &PathBuf, filter: BloomBitVec) -> io::Result<()> {
+fn write_filter(dst_filename: &PathBuf, filter: BloomBitVec) -> io::Result<()>
+{
     let (mut bitmap, k_num) = filter.bitmap_k_num();
     let config = AppConfig {
         bf_config: BloomFilterConfig {
@@ -254,7 +271,8 @@ fn write_filter(dst_filename: &PathBuf, filter: BloomBitVec) -> io::Result<()> {
     ExtFile::<File>::write_to_stream(encoded_config, bitmap, dst_file)
 }
 
-fn data_error(message: &str) -> io::Error {
+fn data_error(message: &str) -> io::Error
+{
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
 
@@ -262,12 +280,14 @@ fn print_bloom_config(
     filter_config: BloomFilterConfig,
     load: Option<u64>,
     fp_rate: Option<f64>,
-) -> io::Result<()> {
+) -> io::Result<()>
+{
     println!("{}", filter_config.info(load, fp_rate));
     Ok(())
 }
 
-fn assert_data_error(assertion: bool, message: &str) -> io::Result<()> {
+fn assert_data_error(assertion: bool, message: &str) -> io::Result<()>
+{
     if assertion {
         Ok(())
     } else {
@@ -275,7 +295,8 @@ fn assert_data_error(assertion: bool, message: &str) -> io::Result<()> {
     }
 }
 
-fn normalize_string(s: &str) -> String {
+fn normalize_string(s: &str) -> String
+{
     s.to_lowercase()
 }
 
@@ -285,7 +306,8 @@ fn calculate_optimal(
         false_positive,
         items_number,
     }: &CalculateConfig,
-) -> io::Result<BloomFilterConfig> {
+) -> io::Result<BloomFilterConfig>
+{
     match (filter_size, false_positive, items_number) {
         (Some(size), Some(fp_p), None) => Ok(bloom::compute_settings_from_size_fp(size, fp_p)),
         (Some(size), None, Some(items)) => Ok(bloom::compute_settings_from_size_items(size, items)),
