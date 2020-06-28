@@ -251,7 +251,7 @@ fn write_filter(dst_filename: &PathBuf, filter: BloomBitVec) -> io::Result<()> {
     };
     let encoded_config = bincode::serialize(&config).unwrap();
     let dst_file = File::create(dst_filename)?;
-    ExtFile::<File>::to_stream(encoded_config, bitmap, dst_file)
+    ExtFile::<File>::write_to_stream(encoded_config, bitmap, dst_file)
 }
 
 fn data_error(message: &str) -> io::Error {

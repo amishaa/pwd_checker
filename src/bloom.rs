@@ -3,7 +3,7 @@
 use siphasher::sip::SipHasher13;
 use std::f64::consts::LN_2;
 use std::hash::{Hash, Hasher};
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BloomFilterConfig {
@@ -107,7 +107,7 @@ where
         Ok((ExtFile { f, offset }, metadata))
     }
 
-    pub fn to_stream<H>(metadata: Vec<u8>, bitmap: Vec<u8>, mut stream: H) -> io::Result<()>
+    pub fn write_to_stream<H>(metadata: Vec<u8>, bitmap: Vec<u8>, mut stream: H) -> io::Result<()>
     where
         H: Write,
     {
@@ -126,15 +126,16 @@ where
         Ok(data)
     }
 
-    fn reset_seek(&mut self) {
+    pub fn form_stream(mut self) -> F {
         self.f.seek(SeekFrom::Start(self.offset)).unwrap();
+        self.f
     }
 }
 
 pub trait BloomHolder {
     // get index-th bit
     fn get(&mut self, index: u64) -> Option<bool>;
-    // size in bits, not bytes
+    // len in bits, not bytes
     fn len(&mut self) -> u64;
     fn count_ones(&mut self) -> u64;
 }
@@ -170,8 +171,7 @@ impl BloomHolder for Vec<u8> {
 impl BloomHolderMut for Vec<u8> {
     fn set_true(&mut self, index: u64) {
         let (w, b) = get_block_offset(index);
-        let val = self[w] | 1 << b;
-        self[w] = val;
+        self[w] |= 1 << b;
     }
 
     fn zeros(size: u64) -> Self {
@@ -231,14 +231,12 @@ where
     /// items_count is an estimation of the maximum number of items to store.
     pub fn new(&BloomFilterConfig { k_num, filter_size }: &BloomFilterConfig) -> Self {
         assert!(k_num > 0 && filter_size > 0);
-        let bitmap_bits: u64 = (filter_size) * 8;
-        let bitmap = H::zeros(bitmap_bits as u64);
-        let sips = Self::sips_new(); // [Self::sip_new(), Self::sip_new()];
+        let bitmap_bits = filter_size * 8;
         Self {
-            bitmap,
+            bitmap: H::zeros(bitmap_bits as u64),
             bitmap_bits,
             k_num,
-            sips,
+            sips: Self::sips_new(),
         }
     }
 
@@ -254,14 +252,14 @@ where
         }
     }
 
-    pub fn union<F>(&mut self, mut other: Bloom<ExtFile<F>>)
+    pub fn union<F>(&mut self, other: Bloom<ExtFile<F>>)
     where
         F: Read + Seek,
     {
         assert!(other.k_num == self.k_num);
         assert!(other.bitmap_bits == self.bitmap_bits);
-        other.bitmap.reset_seek();
-        self.bitmap.union(other.bitmap.f);
+        self.bitmap
+            .union(BufReader::new(other.bitmap.form_stream()));
     }
 }
 
@@ -270,10 +268,9 @@ where
     H: BloomHolder,
 {
     pub fn from_bitmap_k_num(mut bitmap: H, k_num: u64) -> Self {
-        let bitmap_bits = bitmap.len();
         Self {
+            bitmap_bits: bitmap.len(),
             bitmap,
-            bitmap_bits,
             k_num,
             sips: Self::sips_new(),
         }
