@@ -3,7 +3,7 @@
 use siphasher::sip::SipHasher13;
 use std::f64::consts::LN_2;
 use std::hash::{Hash, Hasher};
-use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom,Write};
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BloomFilterConfig
@@ -210,6 +210,7 @@ where
 {
     fn get(&mut self, index: u64) -> Option<bool>
     {
+        let original_seek = self.seek(SeekFrom::Current(0)).unwrap();
         if index > self.len_bits() {
             return None;
         }
@@ -218,6 +219,7 @@ where
         let mut buf = [0u8; 1];
         self.seek(SeekFrom::Start(w)).unwrap();
         self.read(&mut buf).unwrap();
+        self.seek(SeekFrom::Start(original_seek)).unwrap();
         Some(buf[0] & (1 << b) != 0)
     }
 
