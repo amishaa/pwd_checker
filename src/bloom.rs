@@ -3,7 +3,7 @@
 use siphasher::sip::SipHasher13;
 use std::f64::consts::LN_2;
 use std::hash::{Hash, Hasher};
-use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom, Write};
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BloomFilterConfig
@@ -76,171 +76,217 @@ impl BloomFilterConfig
     }
 }
 
-pub struct ExtFile<F>
+pub struct OffsetStream<F>
+where
+    F: Read + Seek,
 {
     f: F,
     offset: u64,
 }
 
-impl<F> ExtFile<F>
+impl<F> OffsetStream<F>
 where
     F: Read + Seek,
 {
-    fn read(&mut self, w: usize) -> u8
+    pub fn new(mut f: F, offset: u64) -> io::Result<Self>
     {
-        let mut buf = [0u8; 1];
-        self.f
-            .seek(SeekFrom::Start(w as u64 + self.offset))
-            .unwrap();
-        self.f.read(&mut buf).unwrap();
-        buf[0]
+        f.seek(SeekFrom::Start(offset))?;
+        Ok(OffsetStream { f, offset })
     }
 
-    fn size(&mut self) -> u64
+    pub fn read_metadata(&mut self) -> io::Result<Vec<u8>>
     {
-        self.f.seek(SeekFrom::End(0)).unwrap() - self.offset
-    }
-
-    pub fn from_stream(mut f: F) -> io::Result<(Self, Vec<u8>)>
-    {
-        f.seek(SeekFrom::Start(0)).unwrap();
-        let mut buf = [0u8; 8];
-        f.read_exact(&mut buf)?;
-        let offset: u64 = u64::from_be_bytes(buf);
-        if offset < 8 || offset >= 1024 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "metadata is corrupt",
-            ));
-        }
-        let mut metadata = vec![0u8; offset as usize - 8];
-        f.read_exact(&mut metadata)?;
-        Ok((ExtFile { f, offset }, metadata))
-    }
-
-    pub fn write_to_stream<H>(metadata: Vec<u8>, bitmap: Vec<u8>, mut stream: H) -> io::Result<()>
-    where
-        H: Write,
-    {
-        let len_prefix: u64 = metadata.len() as u64 + 8u64;
-        assert!(len_prefix < 1024);
-        stream.write_all(&len_prefix.to_be_bytes().to_vec())?;
-        stream.write_all(&metadata)?;
-        stream.write_all(&bitmap)?;
-        Ok(())
-    }
-
-    pub fn to_vec(&mut self) -> io::Result<Vec<u8>>
-    {
-        let mut data = vec![0u8; self.size() as usize];
-        self.f.seek(SeekFrom::Start(self.offset)).unwrap();
-        self.f.read_exact(&mut data).unwrap();
-        Ok(data)
-    }
-
-    pub fn form_stream(mut self) -> F
-    {
-        self.f.seek(SeekFrom::Start(self.offset)).unwrap();
-        self.f
+        let seek = self.f.seek(SeekFrom::Current(0))?;
+        self.f.seek(SeekFrom::Start(0))?;
+        let mut buf = vec![0u8; self.offset as usize];
+        self.f.read(&mut buf)?;
+        self.f.seek(SeekFrom::Start(seek))?;
+        Ok(buf)
     }
 }
 
-pub trait BloomHolder
+impl<F> OffsetStream<F>
+where
+    F: Read + Write + Seek,
+{
+    pub fn write_metadata(&mut self, buf: &[u8]) -> io::Result<()>
+    {
+        if buf.len() as u64 >= self.offset {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Too long metadata",
+            ));
+        }
+        let seek = self.f.seek(SeekFrom::Current(0))?;
+        self.f.seek(SeekFrom::Start(0))?;
+        self.f.write_all(&buf)?;
+        self.f.seek(SeekFrom::Start(seek))?;
+        Ok(())
+    }
+}
+
+impl<F> Read for OffsetStream<F>
+where
+    F: Read + Seek,
+{
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize>
+    {
+        self.f.read(buf)
+    }
+}
+
+impl<F> Seek for OffsetStream<F>
+where
+    F: Read + Seek,
+{
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64>
+    {
+        let seek = self.f.seek(SeekFrom::Current(0))?;
+        match pos {
+            SeekFrom::Start(start_seek) => {
+                self.f.seek(SeekFrom::Start(start_seek + self.offset))?;
+                Ok(start_seek)
+            }
+            other_seek => {
+                let new_offset = self.f.seek(other_seek)?;
+                if new_offset >= self.offset {
+                    Ok(new_offset - self.offset)
+                } else {
+                    self.f.seek(SeekFrom::Start(seek))?;
+                    Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Seek before stream start",
+                    ))
+                }
+            }
+        }
+    }
+}
+
+impl<F> Write for OffsetStream<F>
+where
+    F: Read + Write + Seek,
+{
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize>
+    {
+        self.f.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()>
+    {
+        self.f.flush()
+    }
+}
+
+pub type BitVecMem = Cursor<Vec<u8>>;
+
+pub trait BitVec: Read + Seek
 {
     // get index-th bit
     fn get(&mut self, index: u64) -> Option<bool>;
     // len in bits, not bytes
-    fn len(&mut self) -> u64;
+    fn len_bits(&mut self) -> u64;
     fn count_ones(&mut self) -> u64;
 }
 
-pub trait BloomHolderMut: BloomHolder
+pub trait BitVecMut: BitVec
 {
-    fn set_true(&mut self, index: u64);
-    // size in bits, not bytes
-    fn zeros(size: u64) -> Self;
+    fn set_true(&mut self, index: u64); // index in bits
+    fn union_byte(&mut self, seek: u64, other_byte: u8); // seek in bytes
+    fn extend(self, new_len: u64) -> Self; // new_len in bits, not bytes
     fn union<H>(&mut self, other: H)
     where
         H: Read;
 }
 
-fn get_block_offset(index: u64) -> (usize, usize)
+fn get_block_offset(index: u64) -> (u64, usize)
 {
-    ((index / 8) as usize, (7 - (index % 8)) as usize)
+    ((index / 8), (7 - (index % 8)) as usize)
 }
 
-impl BloomHolder for Vec<u8>
+impl<F> BitVec for F
+where
+    F: Read + Seek,
 {
     fn get(&mut self, index: u64) -> Option<bool>
     {
+        if index > self.len_bits() {
+            return None;
+        }
         let (w, b) = get_block_offset(index);
-        <[u8]>::get(&self, w as usize).map(|&val| val & (1 << b) != 0)
+
+        let mut buf = [0u8; 1];
+        self.seek(SeekFrom::Start(w)).unwrap();
+        self.read(&mut buf).unwrap();
+        Some(buf[0] & (1 << b) != 0)
     }
 
-    fn len(&mut self) -> u64
+    fn len_bits(&mut self) -> u64
     {
-        (Vec::<u8>::len(self) * 8) as u64
+        let original_seek = self.seek(SeekFrom::Current(0)).unwrap();
+        let result = self.seek(SeekFrom::End(0)).unwrap();
+        self.seek(SeekFrom::Start(original_seek)).unwrap();
+        result * 8
     }
 
     fn count_ones(&mut self) -> u64
     {
-        self.iter().map(|x| x.count_ones() as u64).sum()
+        let original_seek = self.seek(SeekFrom::Current(0)).unwrap();
+        let mut result = 0;
+        let mut buf = [0u8; 1];
+        self.seek(SeekFrom::Start(0)).unwrap();
+        while self.read(&mut buf).unwrap() > 0 {
+            result += buf[0].count_ones() as u64
+        }
+        self.seek(SeekFrom::Start(original_seek)).unwrap();
+        result
     }
 }
 
-impl BloomHolderMut for Vec<u8>
+impl<F> BitVecMut for F
+where
+    F: Read + Write + Seek,
 {
+    fn union_byte(&mut self, seek: u64, other_byte: u8)
+    {
+        let mut buf = [0u8; 1];
+        self.seek(SeekFrom::Start(seek)).unwrap();
+        assert!(self.read(&mut buf).unwrap() == 1);
+        buf[0] |= other_byte;
+        self.seek(SeekFrom::Start(seek)).unwrap();
+        self.write_all(&buf).unwrap();
+    }
+
     fn set_true(&mut self, index: u64)
     {
         let (w, b) = get_block_offset(index);
-        self[w] |= 1 << b;
+        self.union_byte(w, 1 << b);
     }
 
-    fn zeros(size: u64) -> Self
+    fn extend(mut self, new_len: u64) -> Self
     {
-        assert!(size % 8 == 0);
-        vec![0; (size / 8) as usize]
+        assert!(new_len > self.len_bits());
+        assert!(new_len % 8 == 0);
+        let buf = [0u8; 1];
+        self.seek(SeekFrom::Start(new_len / 8 - 1)).unwrap();
+        self.write_all(&buf).unwrap();
+        self
     }
 
     fn union<H>(&mut self, other: H)
     where
         H: Read,
     {
-        self.iter_mut()
-            .zip(other.bytes())
-            .for_each(|(a, b)| *a |= b.unwrap());
-    }
-}
-
-impl<F> BloomHolder for ExtFile<F>
-where
-    F: Read + Seek,
-{
-    fn get(&mut self, index: u64) -> Option<bool>
-    {
-        if index > self.len() {
-            return None;
-        }
-        let (w, b) = get_block_offset(index);
-        let val = self.read(w);
-        Some(val & (1 << b) != 0)
-    }
-
-    fn len(&mut self) -> u64
-    {
-        ExtFile::size(self) * 8
-    }
-
-    fn count_ones(&mut self) -> u64
-    {
-        self.to_vec().unwrap().count_ones()
+        (0u64..)
+            .zip(other.bytes().map(|a| a.unwrap()))
+            .for_each(|(i, w)| self.union_byte(i, w));
     }
 }
 
 /// Bloom filter structure
 pub struct Bloom<T>
 where
-    T: BloomHolder,
+    T: BitVec,
 {
     bitmap: T,
     bitmap_bits: u64,
@@ -250,17 +296,17 @@ where
 
 impl<H> Bloom<H>
 where
-    H: BloomHolderMut,
+    H: BitVecMut,
 {
     /// Create a new bloom filter structure.
     /// bitmap_size is the size in bytes (not bits) that will be allocated in memory
     /// items_count is an estimation of the maximum number of items to store.
-    pub fn new(&BloomFilterConfig { k_num, filter_size }: &BloomFilterConfig) -> Self
+    pub fn new(&BloomFilterConfig { k_num, filter_size }: &BloomFilterConfig, holder: H) -> Self
     {
         assert!(k_num > 0 && filter_size > 0);
         let bitmap_bits = filter_size * 8;
         Self {
-            bitmap: H::zeros(bitmap_bits as u64),
+            bitmap: holder.extend(bitmap_bits),
             bitmap_bits,
             k_num,
             sips: Self::sips_new(),
@@ -279,25 +325,24 @@ where
         }
     }
 
-    pub fn union<F>(&mut self, other: Bloom<ExtFile<F>>)
+    pub fn union<F>(&mut self, other: Bloom<F>)
     where
-        F: Read + Seek,
+        F: BitVec,
     {
         assert!(other.k_num == self.k_num);
         assert!(other.bitmap_bits == self.bitmap_bits);
-        self.bitmap
-            .union(BufReader::new(other.bitmap.form_stream()));
+        self.bitmap.union(BufReader::new(other.bitmap));
     }
 }
 
 impl<H> Bloom<H>
 where
-    H: BloomHolder,
+    H: BitVec,
 {
     pub fn from_bitmap_k_num(mut bitmap: H, k_num: u64) -> Self
     {
         Self {
-            bitmap_bits: bitmap.len(),
+            bitmap_bits: bitmap.len_bits(),
             bitmap,
             k_num,
             sips: Self::sips_new(),
@@ -320,8 +365,9 @@ where
     }
 
     /// Return the bitmap and k_num
-    pub fn bitmap_k_num(self) -> (H, u64)
+    pub fn bitmap_k_num(mut self) -> (H, u64)
     {
+        self.bitmap.seek(SeekFrom::Start(0)).unwrap();
         (self.bitmap, self.k_num)
     }
 
@@ -334,9 +380,10 @@ where
             item.hash(sip);
             let hash = sip.finish();
             hashes[k_i as usize] = hash;
-            hash as u64
+            hash
         } else {
-            hashes[0].wrapping_add((k_i as u64).wrapping_mul(hashes[1]) % 0xffffffffffffffc5) as u64
+            ((hashes[0] as u128 + (k_i as u128) * (hashes[1] as u128)) % 0xffffffffffffffc5) as u64
+            //2**64-59 = the biggest u64 prime
         }
     }
 
@@ -346,6 +393,13 @@ where
             SipHasher13::new_with_keys(0, 1),
             SipHasher13::new_with_keys(1, 0),
         ]
+    }
+
+    pub fn to_mem(mut self) -> io::Result<Bloom<BitVecMem>>
+    {
+        let mut holder = vec![];
+        self.bitmap.read_to_end(&mut holder)?;
+        Ok(Bloom::from_bitmap_k_num(BitVecMem::new(holder), self.k_num))
     }
 }
 
@@ -429,14 +483,4 @@ pub fn compute_settings_from_size_items(filter_size: u64, items_count: u64) -> B
         .min_by(|a, b| a.partial_cmp(b).unwrap())
         .unwrap();
     BloomFilterConfig { k_num, filter_size }
-}
-
-impl<F> Bloom<ExtFile<F>>
-where
-    F: Read + Seek,
-{
-    pub fn to_mem(mut self) -> io::Result<Bloom<Vec<u8>>>
-    {
-        Ok(Bloom::from_bitmap_k_num(self.bitmap.to_vec()?, self.k_num))
-    }
 }

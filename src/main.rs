@@ -1,14 +1,13 @@
-use std::{
-    fs::File,
-    io::{self, BufRead},
-    path::PathBuf,
-};
+use std::io::{self, BufRead, Read};
+use std::{fs::File, path::PathBuf};
 use structopt::StructOpt;
 
 mod bloom;
-use bloom::{Bloom, BloomFilterConfig, BloomHolder, ExtFile};
+use bloom::{BitVec, BitVecMem, Bloom, BloomFilterConfig, OffsetStream};
 
-type BloomBitVec = bloom::Bloom<Vec<u8>>;
+const METADATA_OFFSET: u64 = 4096;
+
+type BloomMem = Bloom<BitVecMem>;
 
 #[derive(StructOpt, Debug)]
 struct NewFilterOptions
@@ -133,9 +132,12 @@ fn main() -> io::Result<()>
             filter_path,
             nfo,
             dry_run: false,
-        } => Ok(BloomBitVec::new(&nfo.to_bloom_config()))
-            .and_then(fill_filter_with_pwd)
-            .and_then(|filter| write_filter(filter_path, filter)),
+        } => Ok(BloomMem::new(
+            &nfo.to_bloom_config(),
+            BitVecMem::new(vec![]),
+        ))
+        .and_then(fill_filter_with_pwd)
+        .and_then(|filter| write_filter(filter_path, filter)),
         Opt::Create {
             nfo,
             filter_path: _,
@@ -166,7 +168,7 @@ fn main() -> io::Result<()>
     }
 }
 
-fn filter_union(input_paths: &Vec<PathBuf>) -> io::Result<BloomBitVec>
+fn filter_union(input_paths: &Vec<PathBuf>) -> io::Result<BloomMem>
 {
     let mut result = None;
     for path in input_paths {
@@ -198,7 +200,7 @@ fn filter_union(input_paths: &Vec<PathBuf>) -> io::Result<BloomBitVec>
 
 fn check_pwd_filter<T>(mut filter: Bloom<T>) -> io::Result<()>
 where
-    T: BloomHolder,
+    T: BitVec,
 {
     println!("Enter passwords to check (ctr+D to exit)");
     for line in io::stdin().lock().lines() {
@@ -207,11 +209,10 @@ where
     Ok(())
 }
 
-fn read_filter(filter_filename: &PathBuf) -> io::Result<(Bloom<ExtFile<File>>, AppConfig)>
+fn read_filter(filter_filename: &PathBuf) -> io::Result<(Bloom<OffsetStream<File>>, AppConfig)>
 {
-    let content = File::open(filter_filename)?;
-
-    let (mut filter_holder, config_binary) = ExtFile::from_stream(content)?;
+    let mut filter_holder = OffsetStream::new(File::open(filter_filename)?, METADATA_OFFSET)?;
+    let config_binary = filter_holder.read_metadata()?;
     let config: AppConfig = bincode::deserialize(&config_binary)
         .map_err(|_| data_error("metadata is corrupt or in wrong format"))?;
     assert_data_error(
@@ -219,7 +220,7 @@ fn read_filter(filter_filename: &PathBuf) -> io::Result<(Bloom<ExtFile<File>>, A
         "application version in metadata does not match application version",
     )?;
     assert_data_error(
-        config.bf_config.filter_size * 8 == filter_holder.len(),
+        config.bf_config.filter_size * 8 == filter_holder.len_bits(),
         "length in metadata does not match file lenght",
     )?;
     let filter = Bloom::from_bitmap_k_num(filter_holder, config.bf_config.k_num);
@@ -230,17 +231,17 @@ fn get_statistics(config: AppConfig)
 {
     let &BloomFilterConfig {
         k_num: _,
-        filter_size: len,
+        filter_size: size,
     } = &config.bf_config;
     let ones = config.ones;
-    let one_rate = (ones as f64) / (len as f64) / 8.;
+    let one_rate = (ones as f64) / (size as f64) / 8.;
     println!("{}", config.bf_config.info(None, None));
     println!("{}", config.bf_config.info_load(None, Some(one_rate)));
 }
 
 fn fill_filter_with_pwd<T>(mut filter: bloom::Bloom<T>) -> io::Result<Bloom<T>>
 where
-    T: bloom::BloomHolderMut,
+    T: bloom::BitVecMut,
 {
     for line in io::stdin().lock().lines() {
         filter.set(&normalize_string(&line?));
@@ -250,25 +251,29 @@ where
 
 fn check_pwd<T>(pwd: &str, filter: &mut Bloom<T>) -> bool
 where
-    T: BloomHolder,
+    T: BitVec,
 {
     filter.check(&normalize_string(pwd))
 }
 
-fn write_filter(dst_filename: &PathBuf, filter: BloomBitVec) -> io::Result<()>
+fn write_filter<T>(dst_filename: &PathBuf, filter: Bloom<T>) -> io::Result<()>
+where
+    T: Read + BitVec,
 {
     let (mut bitmap, k_num) = filter.bitmap_k_num();
     let config = AppConfig {
         bf_config: BloomFilterConfig {
             k_num,
-            filter_size: BloomHolder::len(&mut bitmap) / 8,
+            filter_size: BitVec::len_bits(&mut bitmap) / 8,
         },
         version: env!("CARGO_PKG_VERSION").to_string(),
         ones: bitmap.count_ones(),
     };
     let encoded_config = bincode::serialize(&config).unwrap();
-    let dst_file = File::create(dst_filename)?;
-    ExtFile::<File>::write_to_stream(encoded_config, bitmap, dst_file)
+    let mut dst_stream = OffsetStream::new(File::create(dst_filename)?, METADATA_OFFSET)?;
+    dst_stream.write_metadata(&encoded_config)?;
+    io::copy(&mut bitmap, &mut dst_stream)?;
+    Ok(())
 }
 
 fn data_error(message: &str) -> io::Error
