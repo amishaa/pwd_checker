@@ -1,5 +1,8 @@
 use std::io::{self, BufRead, Read};
-use std::{fs::File, path::PathBuf};
+use std::{
+    fs::{File, OpenOptions},
+    path::PathBuf,
+};
 use structopt::StructOpt;
 
 mod bloom;
@@ -132,7 +135,7 @@ fn main() -> io::Result<()>
     let opt = Opt::from_args();
     match &opt {
         Opt::Check { filter_path } => {
-            read_filter(filter_path).and_then(|(filter, _)| check_pwd_filter(filter))
+            read_filter(filter_path, None).and_then(|(filter, _)| check_pwd_filter(filter))
         }
         Opt::Create {
             filter_path,
@@ -152,11 +155,14 @@ fn main() -> io::Result<()>
         Opt::Add {
             base_filter,
             filter_path,
-        } => read_filter(base_filter)
+        } => read_filter(base_filter, None)
             .and_then(|(filter, _)| fill_filter_with_pwd(filter.to_mem()?, |_, _| Ok(())))
             .and_then(|filter| write_filter(filter_path, filter)),
         Opt::AddInPlace { filter_path } => {
-            let (filter, mut metadata) = read_filter(filter_path)?;
+            let mut rw_config = OpenOptions::new();
+            rw_config.read(true).write(true);
+            let (filter, mut metadata) =
+                read_filter(filter_path, Some(rw_config))?;
             let update_metadata = |holder: &mut OffsetStream<File>, new_ones| {
                 metadata.ones += new_ones;
                 holder.write_metadata(&bincode::serialize(&metadata).unwrap())
@@ -168,7 +174,7 @@ fn main() -> io::Result<()>
             input_paths,
         } => filter_union(input_paths).and_then(|filter| write_filter(filter_path, filter)),
         Opt::Info { filter_path } => {
-            read_filter(filter_path).map(|(_, config)| get_statistics(config))
+            read_filter(filter_path, None).map(|(_, config)| get_statistics(config))
         }
         Opt::Calculate { calculate_config } => {
             calculate_optimal(calculate_config).and_then(|config| {
@@ -186,7 +192,7 @@ fn filter_union(input_paths: &Vec<PathBuf>) -> io::Result<BloomMem>
 {
     let mut result = None;
     for path in input_paths {
-        let new_filter = read_filter(&path);
+        let new_filter = read_filter(&path, None);
         match new_filter {
             Err(e) => {
                 eprintln!("File {:?} skipped, read/parsing error: {}", &path, e);
@@ -223,9 +229,15 @@ where
     Ok(())
 }
 
-fn read_filter(filter_filename: &PathBuf) -> io::Result<(Bloom<OffsetStream<File>>, AppConfig)>
+fn read_filter(
+    filter_filename: &PathBuf,
+    open_option: Option<OpenOptions>,
+) -> io::Result<(Bloom<OffsetStream<File>>, AppConfig)>
 {
-    let mut filter_holder = OffsetStream::new(File::open(filter_filename)?, METADATA_OFFSET)?;
+    let mut r_config = OpenOptions::new();
+    r_config.read(true);
+    let open_option = open_option.unwrap_or(r_config);
+    let mut filter_holder = OffsetStream::new(open_option.open(filter_filename)?, METADATA_OFFSET)?;
     let config_binary = filter_holder.read_metadata()?;
     let config: AppConfig = bincode::deserialize(&config_binary)
         .map_err(|_| data_error("metadata is corrupt or in wrong format"))?;
