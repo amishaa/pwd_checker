@@ -3,7 +3,9 @@ use std::{fs::File, path::PathBuf};
 use structopt::StructOpt;
 
 mod bloom;
-use bloom::{BitVec, BitVecMem, Bloom, BloomFilterConfig, OffsetStream};
+use bloom::{
+    BitVec, BitVecMem, Bloom, BloomFilterConfig, MetadataHolder, MetadataHolderMut, OffsetStream,
+};
 
 const METADATA_OFFSET: u64 = 4096;
 
@@ -83,6 +85,13 @@ enum Opt
         #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
         filter_path: PathBuf,
     },
+    /// Add new passwords to the filter on the disk
+    AddInPlace
+    {
+        /// Base = Output file for the filter
+        #[structopt(short = "-p", long, parse(from_os_str), env = "BLOOM_FILTER_FILE")]
+        filter_path: PathBuf,
+    },
     /// Union, settings from first valid filter will be pined, all remaining will be dropped
     Union
     {
@@ -133,7 +142,7 @@ fn main() -> io::Result<()>
             &nfo.to_bloom_config(),
             BitVecMem::new(vec![]),
         ))
-        .and_then(fill_filter_with_pwd)
+        .and_then(|filter| fill_filter_with_pwd(filter, None))
         .and_then(|filter| write_filter(filter_path, filter)),
         Opt::Create {
             nfo,
@@ -144,8 +153,9 @@ fn main() -> io::Result<()>
             base_filter,
             filter_path,
         } => read_filter(base_filter)
-            .and_then(|(filter, _)| fill_filter_with_pwd(filter.to_mem()?))
+            .and_then(|(filter, _)| fill_filter_with_pwd(filter.to_mem()?, None))
             .and_then(|filter| write_filter(filter_path, filter)),
+        Opt::AddInPlace { filter_path } => unimplemented!(),
         Opt::Union {
             filter_path,
             input_paths,
@@ -233,7 +243,10 @@ fn get_statistics(config: AppConfig)
     println!("{}", config.bf_config.info_load(None, Some(one_rate)));
 }
 
-fn fill_filter_with_pwd<T>(mut filter: bloom::Bloom<T>) -> io::Result<Bloom<T>>
+fn fill_filter_with_pwd<T>(
+    mut filter: bloom::Bloom<T>,
+    side_effect: Option<u32>,
+) -> io::Result<Bloom<T>>
 where
     T: bloom::BitVecMut,
 {

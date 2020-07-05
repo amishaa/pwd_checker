@@ -93,6 +93,16 @@ impl BloomFilterConfig
     }
 }
 
+pub trait MetadataHolder
+{
+    fn read_metadata(&mut self) -> io::Result<Vec<u8>>;
+}
+
+pub trait MetadataHolderMut: MetadataHolder
+{
+    fn write_metadata(&mut self, buf: &[u8]) -> io::Result<()>;
+}
+
 pub struct OffsetStream<F>
 where
     F: Read + Seek,
@@ -110,8 +120,13 @@ where
         f.seek(SeekFrom::Start(offset))?;
         Ok(OffsetStream { f, offset })
     }
+}
 
-    pub fn read_metadata(&mut self) -> io::Result<Vec<u8>>
+impl<F> MetadataHolder for OffsetStream<F>
+where
+    F: Read + Seek,
+{
+    fn read_metadata(&mut self) -> io::Result<Vec<u8>>
     {
         let seek = self.f.seek(SeekFrom::Current(0))?;
         self.f.seek(SeekFrom::Start(0))?;
@@ -122,11 +137,11 @@ where
     }
 }
 
-impl<F> OffsetStream<F>
+impl<F> MetadataHolderMut for OffsetStream<F>
 where
     F: Read + Write + Seek,
 {
-    pub fn write_metadata(&mut self, buf: &[u8]) -> io::Result<()>
+    fn write_metadata(&mut self, buf: &[u8]) -> io::Result<()>
     {
         if buf.len() as u64 >= self.offset {
             return Err(io::Error::new(
@@ -208,10 +223,11 @@ pub trait BitVec: Read + Seek
 
 pub trait BitVecMut: BitVec
 {
-    fn set_true(&mut self, index: u64); // index in bits
-    fn union_byte(&mut self, seek: u64, other_byte: u8); // seek in bytes
+    /// All functions return number of changed bits
+    fn set_true(&mut self, index: u64) -> u64; // index in bits
+    fn union_byte(&mut self, seek: u64, other_byte: u8) -> u64; // seek in bytes
     fn extend(self, new_len: u64) -> Self; // new_len in bits, not bytes
-    fn union<H>(&mut self, other: H)
+    fn union<H>(&mut self, other: H) -> u64
     where
         H: Read;
 }
@@ -266,20 +282,22 @@ impl<F> BitVecMut for F
 where
     F: Read + Write + Seek,
 {
-    fn union_byte(&mut self, seek: u64, other_byte: u8)
+    fn union_byte(&mut self, seek: u64, other_byte: u8) -> u64
     {
         let mut buf = [0u8; 1];
         self.seek(SeekFrom::Start(seek)).unwrap();
         assert!(self.read(&mut buf).unwrap() == 1);
+        let original_ones = buf[0].count_ones();
         buf[0] |= other_byte;
         self.seek(SeekFrom::Start(seek)).unwrap();
         self.write_all(&buf).unwrap();
+        (buf[0].count_ones() - original_ones) as u64
     }
 
-    fn set_true(&mut self, index: u64)
+    fn set_true(&mut self, index: u64) -> u64
     {
         let (w, b) = get_block_offset(index);
-        self.union_byte(w, 1 << b);
+        self.union_byte(w, 1 << b)
     }
 
     fn extend(mut self, new_len: u64) -> Self
@@ -292,13 +310,15 @@ where
         self
     }
 
-    fn union<H>(&mut self, other: H)
+    fn union<H>(&mut self, other: H) -> u64
     where
         H: Read,
     {
+        let mut result = 0;
         (0u64..)
             .zip(other.bytes().map(|a| a.unwrap()))
-            .for_each(|(i, w)| self.union_byte(i, w));
+            .for_each(|(i, w)| result += self.union_byte(i, w));
+        result
     }
 }
 
@@ -332,25 +352,27 @@ where
         }
     }
 
-    /// Record the presence of an item.
-    pub fn set<T>(&mut self, item: &T)
+    /// Record the presence of an item. Returns number of changed bits.
+    pub fn set<T>(&mut self, item: &T) -> u64
     where
         T: Hash + ?Sized,
     {
+        let mut result = 0;
         let mut hashes = [0u64, 0u64];
         for k_i in 0..self.k_num {
             let bit_offset = (self.bloom_hash(&mut hashes, &item, k_i) % self.bitmap_bits) as u64;
-            self.bitmap.set_true(bit_offset);
+            result += self.bitmap.set_true(bit_offset);
         }
+        result
     }
 
-    pub fn union<F>(&mut self, other: Bloom<F>)
+    pub fn union<F>(&mut self, other: Bloom<F>) -> u64
     where
         F: BitVec,
     {
         assert!(other.k_num == self.k_num);
         assert!(other.bitmap_bits == self.bitmap_bits);
-        self.bitmap.union(BufReader::new(other.bitmap));
+        self.bitmap.union(BufReader::new(other.bitmap))
     }
 }
 
