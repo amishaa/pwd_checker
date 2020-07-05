@@ -161,8 +161,7 @@ fn main() -> io::Result<()>
         Opt::AddInPlace { filter_path } => {
             let mut rw_config = OpenOptions::new();
             rw_config.read(true).write(true);
-            let (filter, mut metadata) =
-                read_filter(filter_path, Some(rw_config))?;
+            let (filter, mut metadata) = read_filter(filter_path, Some(rw_config))?;
             let update_metadata = |holder: &mut OffsetStream<File>, new_ones| {
                 metadata.ones += new_ones;
                 holder.write_metadata(&bincode::serialize(&metadata).unwrap())
