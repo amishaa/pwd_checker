@@ -142,7 +142,7 @@ fn main() -> io::Result<()>
             &nfo.to_bloom_config(),
             BitVecMem::new(vec![]),
         ))
-        .and_then(|filter| fill_filter_with_pwd(filter, None))
+        .and_then(|filter| fill_filter_with_pwd(filter, |_, _| Ok(())))
         .and_then(|filter| write_filter(filter_path, filter)),
         Opt::Create {
             nfo,
@@ -153,9 +153,16 @@ fn main() -> io::Result<()>
             base_filter,
             filter_path,
         } => read_filter(base_filter)
-            .and_then(|(filter, _)| fill_filter_with_pwd(filter.to_mem()?, None))
+            .and_then(|(filter, _)| fill_filter_with_pwd(filter.to_mem()?, |_, _| Ok(())))
             .and_then(|filter| write_filter(filter_path, filter)),
-        Opt::AddInPlace { filter_path } => unimplemented!(),
+        Opt::AddInPlace { filter_path } => {
+            let (filter, mut metadata) = read_filter(filter_path)?;
+            let update_metadata = |holder: &mut OffsetStream<File>, new_ones| {
+                metadata.ones += new_ones;
+                holder.write_metadata(&bincode::serialize(&metadata).unwrap())
+            };
+            fill_filter_with_pwd(filter, update_metadata).map(|_| ())
+        }
         Opt::Union {
             filter_path,
             input_paths,
@@ -243,15 +250,17 @@ fn get_statistics(config: AppConfig)
     println!("{}", config.bf_config.info_load(None, Some(one_rate)));
 }
 
-fn fill_filter_with_pwd<T>(
+fn fill_filter_with_pwd<T, F>(
     mut filter: bloom::Bloom<T>,
-    side_effect: Option<u32>,
+    mut side_effect: F,
 ) -> io::Result<Bloom<T>>
 where
     T: bloom::BitVecMut,
+    F: FnMut(&mut T, u64) -> io::Result<()>,
 {
     for line in io::stdin().lock().lines() {
-        filter.set(&normalize_string(&line?));
+        let new_ones = filter.set(&normalize_string(&line?));
+        side_effect(filter.get_bitmap(), new_ones)?;
     }
     Ok(filter)
 }
@@ -263,12 +272,12 @@ where
     filter.check(&normalize_string(pwd))
 }
 
-fn write_filter<T>(dst_filename: &PathBuf, filter: Bloom<T>) -> io::Result<()>
+fn write_filter<T>(dst_filename: &PathBuf, mut filter: Bloom<T>) -> io::Result<()>
 where
     T: Read + BitVec,
 {
     let bf_config = filter.bf_config();
-    let mut bitmap = filter.to_bitmap();
+    let mut bitmap = filter.get_bitmap();
     let config = AppConfig {
         bf_config,
         version: env!("CARGO_PKG_VERSION").to_string(),

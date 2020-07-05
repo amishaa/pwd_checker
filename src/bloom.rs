@@ -406,10 +406,10 @@ where
     }
 
     /// Return the bitmap
-    pub fn to_bitmap(mut self) -> H
+    pub fn get_bitmap(&mut self) -> &mut H
     {
         self.bitmap.seek(SeekFrom::Start(0)).unwrap();
-        self.bitmap
+        &mut self.bitmap
     }
 
     fn bloom_hash<T>(&self, hashes: &mut [u64; 2], item: &T, k_i: u64) -> u64
