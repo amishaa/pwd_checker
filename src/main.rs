@@ -25,10 +25,7 @@ impl NewFilterOptions
 {
     fn to_bloom_config(&self) -> BloomFilterConfig
     {
-        BloomFilterConfig {
-            filter_size: self.filter_size,
-            k_num: self.k_num,
-        }
+        BloomFilterConfig::new(self.filter_size * 8, self.k_num)
     }
 }
 
@@ -220,21 +217,18 @@ fn read_filter(filter_filename: &PathBuf) -> io::Result<(Bloom<OffsetStream<File
         "application version in metadata does not match application version",
     )?;
     assert_data_error(
-        config.bf_config.filter_size * 8 == filter_holder.len_bits(),
+        config.bf_config.len_bits() == filter_holder.len_bits(),
         "length in metadata does not match file lenght",
     )?;
-    let filter = Bloom::from_bitmap_k_num(filter_holder, config.bf_config.k_num);
+    let filter = Bloom::from_bitmap_k_num(filter_holder, config.bf_config.k_num());
     Ok((filter, config))
 }
 
 fn get_statistics(config: AppConfig)
 {
-    let &BloomFilterConfig {
-        k_num: _,
-        filter_size: size,
-    } = &config.bf_config;
+    let filter_len_bits = config.bf_config.len_bits();
     let ones = config.ones;
-    let one_rate = (ones as f64) / (size as f64) / 8.;
+    let one_rate = (ones as f64) / (filter_len_bits as f64);
     println!("{}", config.bf_config.info(None, None));
     println!("{}", config.bf_config.info_load(None, Some(one_rate)));
 }
@@ -260,12 +254,10 @@ fn write_filter<T>(dst_filename: &PathBuf, filter: Bloom<T>) -> io::Result<()>
 where
     T: Read + BitVec,
 {
-    let (mut bitmap, k_num) = filter.bitmap_k_num();
+    let bf_config = filter.bf_config();
+    let mut bitmap = filter.to_bitmap();
     let config = AppConfig {
-        bf_config: BloomFilterConfig {
-            k_num,
-            filter_size: BitVec::len_bits(&mut bitmap) / 8,
-        },
+        bf_config,
         version: env!("CARGO_PKG_VERSION").to_string(),
         ones: bitmap.count_ones(),
     };

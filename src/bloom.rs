@@ -3,25 +3,44 @@
 use siphasher::sip::SipHasher13;
 use std::f64::consts::LN_2;
 use std::hash::{Hash, Hasher};
-use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom,Write};
+use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom, Write};
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BloomFilterConfig
 {
     /// filter size in bytes
-    pub filter_size: u64,
-    pub k_num: u64,
+    filter_size: u64,
+    k_num: u64,
 }
 
 impl BloomFilterConfig
 {
+    pub fn new(filter_len: u64, k_num: u64) -> Self
+    {
+        assert!(filter_len % 8 == 0);
+        BloomFilterConfig {
+            filter_size: filter_len / 8,
+            k_num,
+        }
+    }
+
+    pub fn k_num(&self) -> u64
+    {
+        self.k_num
+    }
+
+    pub fn len_bits(&self) -> u64
+    {
+        self.filter_size * 8
+    }
+
     pub fn info(&self, load: Option<u64>, fp_rate: Option<f64>) -> String
     {
         format!("Size (in bytes): {}\nNumber of hashers: {}\nExpected fp rate {} under load below {} items{}{}", 
-                self.filter_size,
-                self.k_num,
-                Self::format_percent(0.5f64.powi(self.k_num as i32)),
-                ((self.filter_size as f64)*8./(self.k_num as f64)*LN_2).ceil() as u64,
+                self.len_bits()/8,
+                self.k_num(),
+                Self::format_percent(0.5f64.powi(self.k_num() as i32)),
+                ((self.len_bits() as f64)/(self.k_num() as f64)*LN_2).ceil() as u64,
                 self.info_load(load, None),
                 self.info_load(fp_rate.map(|x| self.max_capacity(x)), None),
                 )
@@ -47,10 +66,9 @@ impl BloomFilterConfig
             )
         } else {
             if let Some(one_rate) = one_rate {
-                let fp = one_rate.powi(self.k_num as i32);
-                let load =
-                    -(((1. - one_rate).ln() / (self.k_num as f64) * (self.filter_size as f64) * 8.)
-                        .ceil()) as u64;
+                let fp = one_rate.powi(self.k_num() as i32);
+                let load = -(((1. - one_rate).ln() / self.k_num() as f64 * self.len_bits() as f64)
+                    .ceil()) as u64;
                 format!(
                     "\nCurrent load is about {}, fp rate {}",
                     load,
@@ -64,15 +82,14 @@ impl BloomFilterConfig
 
     pub fn max_capacity(&self, fp_rate: f64) -> u64
     {
-        let one_rate = fp_rate.powf(1. / self.k_num as f64);
-        ((1. - one_rate).ln() / self.k_num as f64 * self.filter_size as f64 * -8.).floor() as u64
+        let one_rate = fp_rate.powf(1. / self.k_num() as f64);
+        (-(1. - one_rate).ln() / self.k_num() as f64 * self.len_bits() as f64).floor() as u64
     }
 
     pub fn estimate_fp_rate(&self, items_count: u64) -> f64
     {
-        let zero_rate =
-            (-((self.k_num * items_count) as f64) / (self.filter_size as f64) / 8.).exp();
-        (1. - zero_rate).powi(self.k_num as i32)
+        let zero_rate = (-((self.k_num() * items_count) as f64) / (self.len_bits() as f64)).exp();
+        (1. - zero_rate).powi(self.k_num() as i32)
     }
 }
 
@@ -303,14 +320,14 @@ where
     /// Create a new bloom filter structure.
     /// bitmap_size is the size in bytes (not bits) that will be allocated in memory
     /// items_count is an estimation of the maximum number of items to store.
-    pub fn new(&BloomFilterConfig { k_num, filter_size }: &BloomFilterConfig, holder: H) -> Self
+    pub fn new(bf_config: &BloomFilterConfig, holder: H) -> Self
     {
-        assert!(k_num > 0 && filter_size > 0);
-        let bitmap_bits = filter_size * 8;
+        let bitmap_bits = bf_config.len_bits();
+        assert!(bf_config.k_num() > 0 && bitmap_bits > 0);
         Self {
             bitmap: holder.extend(bitmap_bits),
             bitmap_bits,
-            k_num,
+            k_num: bf_config.k_num(),
             sips: Self::sips_new(),
         }
     }
@@ -366,11 +383,11 @@ where
         true
     }
 
-    /// Return the bitmap and k_num
-    pub fn bitmap_k_num(mut self) -> (H, u64)
+    /// Return the bitmap
+    pub fn to_bitmap(mut self) -> H
     {
         self.bitmap.seek(SeekFrom::Start(0)).unwrap();
-        (self.bitmap, self.k_num)
+        self.bitmap
     }
 
     fn bloom_hash<T>(&self, hashes: &mut [u64; 2], item: &T, k_i: u64) -> u64
@@ -402,6 +419,11 @@ where
         let mut holder = vec![];
         self.bitmap.read_to_end(&mut holder)?;
         Ok(Bloom::from_bitmap_k_num(BitVecMem::new(holder), self.k_num))
+    }
+
+    pub fn bf_config(&self) -> BloomFilterConfig
+    {
+        BloomFilterConfig::new(self.bitmap_bits, self.k_num)
     }
 }
 
