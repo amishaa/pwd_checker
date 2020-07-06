@@ -226,7 +226,7 @@ pub trait BitVecMut: BitVec
     /// All functions return number of changed bits
     fn set_true(&mut self, index: u64) -> u64; // index in bits
     fn union_byte(&mut self, seek: u64, other_byte: u8) -> u64; // seek in bytes
-    fn extend(self, new_len: u64) -> Self; // new_len in bits, not bytes
+    fn zeros(self, new_len: u64) -> Self; // new_len in bits, not bytes
     fn union<H>(&mut self, other: H) -> u64
     where
         H: Read;
@@ -300,13 +300,12 @@ where
         self.union_byte(w, 1 << b)
     }
 
-    fn extend(mut self, new_len: u64) -> Self
+    fn zeros(mut self, new_len: u64) -> Self
     {
         assert!(new_len > self.len_bits());
         assert!(new_len % 8 == 0);
-        let buf = [0u8; 1];
-        self.seek(SeekFrom::Start(new_len / 8 - 1)).unwrap();
-        self.write_all(&buf).unwrap();
+        self.seek(SeekFrom::Start(0)).unwrap();
+        io::copy(&mut io::repeat(0).take(new_len / 8), &mut self).unwrap();
         self
     }
 
@@ -345,7 +344,7 @@ where
         let bitmap_bits = bf_config.len_bits();
         assert!(bf_config.k_num() > 0 && bitmap_bits > 0);
         Self {
-            bitmap: holder.extend(bitmap_bits),
+            bitmap: holder.zeros(bitmap_bits),
             bitmap_bits,
             k_num: bf_config.k_num(),
             sips: Self::sips_new(),
