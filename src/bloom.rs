@@ -5,94 +5,6 @@ use std::f64::consts::LN_2;
 use std::hash::{Hash, Hasher};
 use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom, Write};
 
-#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct BloomFilterConfig
-{
-    /// filter size in bytes
-    filter_size: u64,
-    k_num: u64,
-}
-
-impl BloomFilterConfig
-{
-    pub fn new(filter_len: u64, k_num: u64) -> Self
-    {
-        assert!(filter_len % 8 == 0);
-        BloomFilterConfig {
-            filter_size: filter_len / 8,
-            k_num,
-        }
-    }
-
-    pub fn k_num(&self) -> u64
-    {
-        self.k_num
-    }
-
-    pub fn len_bits(&self) -> u64
-    {
-        self.filter_size * 8
-    }
-
-    pub fn info(&self, load: Option<u64>, fp_rate: Option<f64>) -> String
-    {
-        format!("Size (in bytes): {}\nNumber of hashers: {}\nExpected fp rate {} under load below {} items{}{}", 
-                self.len_bits()/8,
-                self.k_num(),
-                Self::format_percent(0.5f64.powi(self.k_num() as i32)),
-                ((self.len_bits() as f64)/(self.k_num() as f64)*LN_2).ceil() as u64,
-                self.info_load(load, None),
-                self.info_load(fp_rate.map(|x| self.max_capacity(x)), None),
-                )
-    }
-
-    fn format_percent(fp: f64) -> String
-    {
-        let fp_percent = fp * 100.;
-        if fp_percent > 0.01 {
-            format!("{:.2}%", fp_percent)
-        } else {
-            "<0.01%".to_string()
-        }
-    }
-
-    pub fn info_load(&self, load: Option<u64>, one_rate: Option<f64>) -> String
-    {
-        if let Some(load) = load {
-            format!(
-                "\nWith load {} fp rate will be {}",
-                load,
-                Self::format_percent(self.estimate_fp_rate(load))
-            )
-        } else {
-            if let Some(one_rate) = one_rate {
-                let fp = one_rate.powi(self.k_num() as i32);
-                let load = -(((1. - one_rate).ln() / self.k_num() as f64 * self.len_bits() as f64)
-                    .ceil()) as u64;
-                format!(
-                    "\nCurrent load is about {}, fp rate {}",
-                    load,
-                    Self::format_percent(fp)
-                )
-            } else {
-                "".to_string()
-            }
-        }
-    }
-
-    pub fn max_capacity(&self, fp_rate: f64) -> u64
-    {
-        let one_rate = fp_rate.powf(1. / self.k_num() as f64);
-        (-(1. - one_rate).ln() / self.k_num() as f64 * self.len_bits() as f64).floor() as u64
-    }
-
-    pub fn estimate_fp_rate(&self, items_count: u64) -> f64
-    {
-        let zero_rate = (-((self.k_num() * items_count) as f64) / (self.len_bits() as f64)).exp();
-        (1. - zero_rate).powi(self.k_num() as i32)
-    }
-}
-
 pub trait MetadataHolder
 {
     fn read_metadata(&mut self) -> io::Result<Vec<u8>>;
@@ -321,6 +233,176 @@ where
     }
 }
 
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct BloomFilterConfig
+{
+    /// filter size in bytes
+    filter_size: u64,
+    k_num: u64,
+}
+
+impl BloomFilterConfig
+{
+    pub fn new(filter_len: u64, k_num: u64) -> Self
+    {
+        assert!(filter_len % 8 == 0);
+        Self {
+            filter_size: filter_len / 8,
+            k_num,
+        }
+    }
+
+    pub fn k_num(&self) -> u64
+    {
+        self.k_num
+    }
+
+    pub fn len_bits(&self) -> u64
+    {
+        self.filter_size * 8
+    }
+
+    pub fn info(&self, load: Option<u64>, fp_rate: Option<f64>) -> String
+    {
+        format!("Size (in bytes): {}\nNumber of hashers: {}\nExpected fp rate {} under load below {} items{}{}", 
+                self.len_bits()/8,
+                self.k_num(),
+                Self::format_percent(0.5f64.powi(self.k_num() as i32)),
+                ((self.len_bits() as f64)/(self.k_num() as f64)*LN_2).ceil() as u64,
+                self.info_load(load, None),
+                self.info_load(fp_rate.map(|x| self.max_capacity(x)), None),
+                )
+    }
+
+    fn format_percent(fp: f64) -> String
+    {
+        let fp_percent = fp * 100.;
+        if fp_percent > 0.01 {
+            format!("{:.2}%", fp_percent)
+        } else {
+            "<0.01%".to_string()
+        }
+    }
+
+    pub fn info_load(&self, load: Option<u64>, one_rate: Option<f64>) -> String
+    {
+        if let Some(load) = load {
+            format!(
+                "\nWith load {} fp rate will be {}",
+                load,
+                Self::format_percent(self.estimate_fp_rate(load))
+            )
+        } else {
+            if let Some(one_rate) = one_rate {
+                let fp = one_rate.powi(self.k_num() as i32);
+                let load = -(((1. - one_rate).ln() / self.k_num() as f64 * self.len_bits() as f64)
+                    .ceil()) as u64;
+                format!(
+                    "\nCurrent load is about {}, fp rate {}",
+                    load,
+                    Self::format_percent(fp)
+                )
+            } else {
+                "".to_string()
+            }
+        }
+    }
+
+    pub fn max_capacity(&self, fp_rate: f64) -> u64
+    {
+        let one_rate = fp_rate.powf(1. / self.k_num() as f64);
+        (-(1. - one_rate).ln() / self.k_num() as f64 * self.len_bits() as f64).floor() as u64
+    }
+
+    pub fn estimate_fp_rate(&self, items_count: u64) -> f64
+    {
+        let zero_rate = (-((self.k_num() * items_count) as f64) / (self.len_bits() as f64)).exp();
+        (1. - zero_rate).powi(self.k_num() as i32)
+    }
+
+    fn size_from_items_k_num_fp(items_count: u64, k_num: u64, fp_p: f64) -> u64
+    {
+        let ones_rate = fp_p.powf(1. / k_num as f64);
+        (items_count as f64 * k_num as f64 / -8. / ((1. - ones_rate).ln())).ceil() as u64
+    }
+
+    /// Compute a recommended bitmap size for items_count items
+    /// and a fp_p rate of false positives.
+    /// fp_p obviously has to be within the ]0.0, 1.0[ range.
+    pub fn from_items_fp(items_count: u64, fp_p: f64) -> Self
+    {
+        assert!(items_count > 0);
+        assert!(fp_p > 0.0 && fp_p < 1.0);
+        let k_num_vars = [
+            (-fp_p.log2()).ceil() as u64,
+            1.max((-fp_p.log2()).floor() as u64),
+        ];
+        let (filter_size, k_num) = k_num_vars
+            .iter()
+            .map(|&k_num_var| {
+                (
+                    Self::size_from_items_k_num_fp(items_count, k_num_var, fp_p),
+                    k_num_var,
+                )
+            })
+            .min()
+            .unwrap();
+        Self { k_num, filter_size }
+    }
+
+    /// Compute a recommended settings for size in bytes and false positive rate
+    pub fn from_size_fp(filter_size: u64, fp_p: f64) -> Self
+    {
+        assert!(filter_size > 0);
+        assert!(fp_p > 0.0 && fp_p < 1.0);
+        let k_num_vars = [
+            (-fp_p.log2()).ceil() as u64,
+            1.max((-fp_p.log2()).floor() as u64),
+        ];
+        let (_, k_num) = k_num_vars
+            .iter()
+            .map(|&k_num_var| {
+                (
+                    BloomFilterConfig {
+                        k_num: k_num_var,
+                        filter_size,
+                    }
+                    .max_capacity(fp_p),
+                    k_num_var,
+                )
+            })
+            .max()
+            .unwrap();
+        Self { k_num, filter_size }
+    }
+
+    /// Compute a recommended settings for size in bytes and number of item
+    pub fn from_size_items(filter_size: u64, items_count: u64) -> Self
+    {
+        assert!(filter_size > 0);
+        assert!(items_count > 0);
+        let k_num_vars = [
+            (filter_size as f64 * 8. / items_count as f64 * LN_2).ceil() as u64,
+            1.max((filter_size as f64 * 8. / items_count as f64 * LN_2).floor() as u64),
+        ];
+        let (_, k_num) = k_num_vars
+            .iter()
+            .map(|&k_num_var| {
+                (
+                    BloomFilterConfig {
+                        k_num: k_num_var,
+                        filter_size,
+                    }
+                    .estimate_fp_rate(items_count),
+                    k_num_var,
+                )
+            })
+            .min_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap();
+        Self { k_num, filter_size }
+    }
+}
+
 /// Bloom filter structure
 pub struct Bloom<T>
 where
@@ -446,86 +528,4 @@ where
     {
         BloomFilterConfig::new(self.bitmap_bits, self.k_num)
     }
-}
-
-fn compute_size_from_items_k_num_fp(items_count: u64, k_num: u64, fp_p: f64) -> u64
-{
-    let ones_rate = fp_p.powf(1. / k_num as f64);
-    (items_count as f64 * k_num as f64 / -8. / ((1. - ones_rate).ln())).ceil() as u64
-}
-
-/// Compute a recommended bitmap size for items_count items
-/// and a fp_p rate of false positives.
-/// fp_p obviously has to be within the ]0.0, 1.0[ range.
-pub fn compute_settings_from_items_fp(items_count: u64, fp_p: f64) -> BloomFilterConfig
-{
-    assert!(items_count > 0);
-    assert!(fp_p > 0.0 && fp_p < 1.0);
-    let k_num_vars = [
-        (-fp_p.log2()).ceil() as u64,
-        1.max((-fp_p.log2()).floor() as u64),
-    ];
-    let (filter_size, k_num) = k_num_vars
-        .iter()
-        .map(|&k_num_var| {
-            (
-                compute_size_from_items_k_num_fp(items_count, k_num_var, fp_p),
-                k_num_var,
-            )
-        })
-        .min()
-        .unwrap();
-    BloomFilterConfig { k_num, filter_size }
-}
-
-/// Compute a recommended settings for size in bytes and false positive rate
-pub fn compute_settings_from_size_fp(filter_size: u64, fp_p: f64) -> BloomFilterConfig
-{
-    assert!(filter_size > 0);
-    assert!(fp_p > 0.0 && fp_p < 1.0);
-    let k_num_vars = [
-        (-fp_p.log2()).ceil() as u64,
-        1.max((-fp_p.log2()).floor() as u64),
-    ];
-    let (_, k_num) = k_num_vars
-        .iter()
-        .map(|&k_num_var| {
-            (
-                BloomFilterConfig {
-                    k_num: k_num_var,
-                    filter_size,
-                }
-                .max_capacity(fp_p),
-                k_num_var,
-            )
-        })
-        .max()
-        .unwrap();
-    BloomFilterConfig { k_num, filter_size }
-}
-
-/// Compute a recommended settings for size in bytes and number of item
-pub fn compute_settings_from_size_items(filter_size: u64, items_count: u64) -> BloomFilterConfig
-{
-    assert!(filter_size > 0);
-    assert!(items_count > 0);
-    let k_num_vars = [
-        (filter_size as f64 * 8. / items_count as f64 * LN_2).ceil() as u64,
-        1.max((filter_size as f64 * 8. / items_count as f64 * LN_2).floor() as u64),
-    ];
-    let (_, k_num) = k_num_vars
-        .iter()
-        .map(|&k_num_var| {
-            (
-                BloomFilterConfig {
-                    k_num: k_num_var,
-                    filter_size,
-                }
-                .estimate_fp_rate(items_count),
-                k_num_var,
-            )
-        })
-        .min_by(|a, b| a.partial_cmp(b).unwrap())
-        .unwrap();
-    BloomFilterConfig { k_num, filter_size }
 }

@@ -7,7 +7,8 @@ use structopt::StructOpt;
 
 mod bloom;
 use bloom::{
-    BitVec, BitVecMem, Bloom, BloomFilterConfig, MetadataHolder, MetadataHolderMut, OffsetStream,
+    BitVec, BitVecMem, Bloom, BloomFilterConfig as BFConfig, MetadataHolder, MetadataHolderMut,
+    OffsetStream,
 };
 
 const METADATA_OFFSET: u64 = 4096;
@@ -28,9 +29,9 @@ struct NewFilterOptions
 
 impl NewFilterOptions
 {
-    fn to_bloom_config(&self) -> BloomFilterConfig
+    fn to_bloom_config(&self) -> BFConfig
     {
-        BloomFilterConfig::new(self.filter_size * 8, self.k_num)
+        BFConfig::new(self.filter_size * 8, self.k_num)
     }
 }
 
@@ -126,7 +127,7 @@ enum Opt
 struct AppConfig
 {
     version: String,
-    bf_config: BloomFilterConfig,
+    bf_config: BFConfig,
     ones: u64,
 }
 
@@ -307,7 +308,7 @@ fn data_error(message: &str) -> io::Error
 }
 
 fn print_bloom_config(
-    filter_config: BloomFilterConfig,
+    filter_config: BFConfig,
     load: Option<u64>,
     fp_rate: Option<f64>,
 ) -> io::Result<()>
@@ -336,12 +337,12 @@ fn calculate_optimal(
         false_positive,
         items_number,
     }: &CalculateConfig,
-) -> io::Result<BloomFilterConfig>
+) -> io::Result<BFConfig>
 {
     match (filter_size, false_positive, items_number) {
-        (Some(size), Some(fp_p), None) => Ok(bloom::compute_settings_from_size_fp(size, fp_p)),
-        (Some(size), None, Some(items)) => Ok(bloom::compute_settings_from_size_items(size, items)),
-        (None, Some(fp_p), Some(items)) => Ok(bloom::compute_settings_from_items_fp(items, fp_p)),
+        (Some(size), Some(fp_p), None) => Ok(BFConfig::from_size_fp(size, fp_p)),
+        (Some(size), None, Some(items)) => Ok(BFConfig::from_size_items(size, items)),
+        (None, Some(fp_p), Some(items)) => Ok(BFConfig::from_items_fp(items, fp_p)),
         (_, _, _) => {
             let passed_args: u32 = filter_size.map_or_else(|| 0, |_| 1)
                 + false_positive.map_or_else(|| 0, |_| 1)
