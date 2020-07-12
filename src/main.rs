@@ -7,8 +7,9 @@ use structopt::StructOpt;
 
 mod bloom;
 use bloom::{
-    BitVec, BitVecMem, Bloom, BloomFilterConfig as BFConfig, MetadataHolder, MetadataHolderMut,
-    OffsetStream,
+    bit_vec::{BitVec, BitVecMem},
+    bloom_filter::{Bloom, BloomFilterConfig as BFConfig},
+    stream_io::{MetadataHolder, MetadataHolderMut, OffsetStream},
 };
 
 const METADATA_OFFSET: u64 = 4096;
@@ -262,12 +263,9 @@ fn get_statistics(config: AppConfig)
     println!("{}", config.bf_config.info_load(None, Some(one_rate)));
 }
 
-fn fill_filter_with_pwd<T, F>(
-    mut filter: bloom::Bloom<T>,
-    mut side_effect: F,
-) -> io::Result<Bloom<T>>
+fn fill_filter_with_pwd<T, F>(mut filter: Bloom<T>, mut side_effect: F) -> io::Result<Bloom<T>>
 where
-    T: bloom::BitVecMut,
+    T: bloom::bit_vec::BitVecMut,
     F: FnMut(&mut T, u64) -> io::Result<()>,
 {
     for line in io::stdin().lock().lines() {
