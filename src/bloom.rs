@@ -245,11 +245,6 @@ pub mod bit_vec
 
 pub mod bloom_filter
 {
-    use super::bit_vec::{BitVec, BitVecMem, BitVecMut};
-    pub use config::BloomFilterConfig;
-    use siphasher::sip::SipHasher13;
-    use std::hash::{Hash, Hasher};
-
     mod config
     {
         use std::f64::consts::LN_2;
@@ -449,6 +444,11 @@ pub mod bloom_filter
         }
     }
 
+    use super::bit_vec::{BitVec, BitVecMem, BitVecMut};
+    pub use config::BloomFilterConfig;
+    use siphasher::sip::SipHasher13;
+    use std::hash::{Hash, Hasher};
+
     /// Bloom filter structure
     pub struct Bloom<T>
     where
@@ -557,7 +557,7 @@ pub mod bloom_filter
             }
         }
 
-        pub fn sips_new() -> [SipHasher13; 2]
+        fn sips_new() -> [SipHasher13; 2]
         {
             [
                 SipHasher13::new_with_keys(0, 1),
