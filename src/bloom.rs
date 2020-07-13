@@ -1,6 +1,5 @@
 // Based on Bloom filter for Rust (C)opyleft 2013-2019 Frank Denis
 
-
 pub mod stream_io
 {
     use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -259,7 +258,7 @@ pub mod bloom_filter
 
         impl BloomFilterConfig
         {
-            pub fn new(filter_len: u64, k_num: u64) -> Self
+            pub fn from_len_k_num(filter_len: u64, k_num: u64) -> Self
             {
                 assert!(filter_len % 8 == 0);
                 Self {
@@ -548,7 +547,7 @@ pub mod bloom_filter
 
         pub fn bf_config(&self) -> BloomFilterConfig
         {
-            BloomFilterConfig::new(self.bitmap_bits, self.k_num)
+            BloomFilterConfig::from_len_k_num(self.bitmap_bits, self.k_num)
         }
     }
 }

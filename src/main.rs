@@ -32,7 +32,7 @@ impl NewFilterOptions
 {
     fn to_bloom_config(&self) -> BFConfig
     {
-        BFConfig::new(self.filter_size * 8, self.k_num)
+        BFConfig::from_len_k_num(self.filter_size * 8, self.k_num)
     }
 }
 
