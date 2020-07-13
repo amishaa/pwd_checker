@@ -30,7 +30,7 @@ struct NewFilterOptions
 
 impl NewFilterOptions
 {
-    fn to_bloom_config(&self) -> BFConfig
+    fn bloom_config(&self) -> BFConfig
     {
         BFConfig::from_len_k_num(self.filter_size * 8, self.k_num)
     }
@@ -50,6 +50,14 @@ struct CalculateConfig
     /// Set desired number of items in the filter
     #[structopt(short, long)]
     items_number: Option<u64>,
+}
+
+impl CalculateConfig
+{
+    fn optimal_config(&self) -> Result<BFConfig, String>
+    {
+        BFConfig::calculate_optimal(self.filter_size, self.false_positive, self.items_number)
+    }
 }
 
 #[derive(StructOpt, Debug)]
@@ -143,17 +151,14 @@ fn main() -> io::Result<()>
             filter_path,
             nfo,
             dry_run: false,
-        } => Ok(BloomMem::new(
-            &nfo.to_bloom_config(),
-            BitVecMem::new(vec![]),
-        ))
-        .and_then(|filter| fill_filter_with_pwd(filter, |_, _| Ok(())))
-        .and_then(|filter| write_filter(filter_path, filter)),
+        } => Ok(BloomMem::new(&nfo.bloom_config(), BitVecMem::new(vec![])))
+            .and_then(|filter| fill_filter_with_pwd(filter, |_, _| Ok(())))
+            .and_then(|filter| write_filter(filter_path, filter)),
         Opt::Create {
             nfo,
             filter_path: _,
             dry_run: true,
-        } => Ok(print_bloom_config(nfo.to_bloom_config(), None, None)),
+        } => Ok(print_bloom_config(nfo.bloom_config(), None, None)),
         Opt::Add {
             base_filter,
             filter_path,
@@ -177,13 +182,16 @@ fn main() -> io::Result<()>
         Opt::Info { filter_path } => {
             read_filter(filter_path, None).map(|(_, config)| get_statistics(config))
         }
-        Opt::Calculate { calculate_config } => calculate_optimal(calculate_config).map(|config| {
-            print_bloom_config(
-                config,
-                calculate_config.items_number,
-                calculate_config.false_positive,
-            )
-        }),
+        Opt::Calculate { calculate_config } => calculate_config
+            .optimal_config()
+            .map_err(|err| data_error(&err))
+            .map(|config| {
+                print_bloom_config(
+                    config,
+                    calculate_config.items_number,
+                    calculate_config.false_positive,
+                )
+            }),
     }
 }
 
@@ -320,10 +328,4 @@ fn assert_data_error(assertion: bool, message: &str) -> io::Result<()>
 fn normalize_string(s: &str) -> String
 {
     s.to_lowercase()
-}
-
-fn calculate_optimal(cc: &CalculateConfig) -> io::Result<BFConfig>
-{
-    BFConfig::calculate_optimal(cc.filter_size, cc.false_positive, cc.items_number)
-        .map_err(|err| data_error(&err))
 }
