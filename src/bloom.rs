@@ -57,17 +57,17 @@ pub mod stream_io
     {
         fn write_metadata(&mut self, buf: &[u8]) -> io::Result<()>
         {
-            let len = buf.len() as u64;
-            if len + 8 >= self.offset {
+            let seek = self.f.seek(SeekFrom::Current(0))?;
+            self.f.seek(SeekFrom::Start(0))?;
+            let mut buf_ext = buf.len().to_be_bytes().to_vec();
+            buf_ext.extend(buf);
+            if buf_ext.len() as u64 >= self.offset {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "Too long metadata",
                 ));
             }
-            let seek = self.f.seek(SeekFrom::Current(0))?;
-            self.f.seek(SeekFrom::Start(0))?;
-            self.f.write_all(&len.to_be_bytes())?;
-            self.f.write_all(&buf)?;
+            self.f.write_all(&buf_ext)?;
             self.f.seek(SeekFrom::Start(seek))?;
             Ok(())
         }
