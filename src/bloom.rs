@@ -419,6 +419,28 @@ pub mod bloom_filter
                     .unwrap();
                 Self { k_num, filter_size }
             }
+
+            pub fn calculate_optimal(
+                filter_size: Option<u64>,
+                false_positive: Option<f64>,
+                items_number: Option<u64>,
+            ) -> Result<Self, String>
+            {
+                match (filter_size, false_positive, items_number) {
+                    (Some(size), Some(fp_p), None) => Ok(Self::from_size_fp(size, fp_p)),
+                    (Some(size), None, Some(items)) => Ok(Self::from_size_items(size, items)),
+                    (None, Some(fp_p), Some(items)) => Ok(Self::from_items_fp(items, fp_p)),
+                    (_, _, _) => {
+                        let passed_args: u32 = filter_size.map_or_else(|| 0, |_| 1)
+                            + false_positive.map_or_else(|| 0, |_| 1)
+                            + items_number.map_or_else(|| 0, |_| 1);
+                        Err(format!(
+                            "Two and only two items should be specified, but {} specified",
+                            passed_args
+                        ))
+                    }
+                }
+            }
         }
     }
 

@@ -153,7 +153,7 @@ fn main() -> io::Result<()>
             nfo,
             filter_path: _,
             dry_run: true,
-        } => print_bloom_config(nfo.to_bloom_config(), None, None),
+        } => Ok(print_bloom_config(nfo.to_bloom_config(), None, None)),
         Opt::Add {
             base_filter,
             filter_path,
@@ -177,15 +177,13 @@ fn main() -> io::Result<()>
         Opt::Info { filter_path } => {
             read_filter(filter_path, None).map(|(_, config)| get_statistics(config))
         }
-        Opt::Calculate { calculate_config } => {
-            calculate_optimal(calculate_config).and_then(|config| {
-                print_bloom_config(
-                    config,
-                    calculate_config.items_number,
-                    calculate_config.false_positive,
-                )
-            })
-        }
+        Opt::Calculate { calculate_config } => calculate_optimal(calculate_config).map(|config| {
+            print_bloom_config(
+                config,
+                calculate_config.items_number,
+                calculate_config.false_positive,
+            )
+        }),
     }
 }
 
@@ -305,14 +303,9 @@ fn data_error(message: &str) -> io::Error
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
 
-fn print_bloom_config(
-    filter_config: BFConfig,
-    load: Option<u64>,
-    fp_rate: Option<f64>,
-) -> io::Result<()>
+fn print_bloom_config(filter_config: BFConfig, load: Option<u64>, fp_rate: Option<f64>)
 {
     println!("{}", filter_config.info(load, fp_rate));
-    Ok(())
 }
 
 fn assert_data_error(assertion: bool, message: &str) -> io::Result<()>
@@ -329,26 +322,8 @@ fn normalize_string(s: &str) -> String
     s.to_lowercase()
 }
 
-fn calculate_optimal(
-    &CalculateConfig {
-        filter_size,
-        false_positive,
-        items_number,
-    }: &CalculateConfig,
-) -> io::Result<BFConfig>
+fn calculate_optimal(cc: &CalculateConfig) -> io::Result<BFConfig>
 {
-    match (filter_size, false_positive, items_number) {
-        (Some(size), Some(fp_p), None) => Ok(BFConfig::from_size_fp(size, fp_p)),
-        (Some(size), None, Some(items)) => Ok(BFConfig::from_size_items(size, items)),
-        (None, Some(fp_p), Some(items)) => Ok(BFConfig::from_items_fp(items, fp_p)),
-        (_, _, _) => {
-            let passed_args: u32 = filter_size.map_or_else(|| 0, |_| 1)
-                + false_positive.map_or_else(|| 0, |_| 1)
-                + items_number.map_or_else(|| 0, |_| 1);
-            Err(data_error(&format!(
-                "Two and only two items should be specified, but {} specified",
-                passed_args
-            )))
-        }
-    }
+    BFConfig::calculate_optimal(cc.filter_size, cc.false_positive, cc.items_number)
+        .map_err(|err| data_error(&err))
 }
