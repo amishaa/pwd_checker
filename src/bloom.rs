@@ -1,10 +1,9 @@
 // Based on Bloom filter for Rust (C)opyleft 2013-2019 Frank Denis
 
-use std::io::{self, Read, Seek, SeekFrom, Write};
 
 pub mod stream_io
 {
-    use super::*;
+    use std::io::{self, Read, Seek, SeekFrom, Write};
 
     pub trait MetadataHolder
     {
@@ -127,7 +126,7 @@ pub mod stream_io
 pub mod bit_vec
 {
 
-    use super::*;
+    use std::io::{self, Read, Seek, SeekFrom, Write};
 
     pub type BitVecMem = io::Cursor<Vec<u8>>;
 
@@ -162,7 +161,6 @@ pub mod bit_vec
     {
         fn get(&mut self, index: u64) -> Option<bool>
         {
-            let original_seek = self.seek(SeekFrom::Current(0)).unwrap();
             if index > self.len_bits() {
                 return None;
             }
@@ -171,28 +169,26 @@ pub mod bit_vec
             let mut buf = [0u8; 1];
             self.seek(SeekFrom::Start(w)).unwrap();
             self.read(&mut buf).unwrap();
-            self.seek(SeekFrom::Start(original_seek)).unwrap();
+            self.seek(SeekFrom::Start(0)).unwrap();
             Some(buf[0] & (1 << b) != 0)
         }
 
         fn len_bits(&mut self) -> u64
         {
-            let original_seek = self.seek(SeekFrom::Current(0)).unwrap();
             let result = self.seek(SeekFrom::End(0)).unwrap();
-            self.seek(SeekFrom::Start(original_seek)).unwrap();
+            self.seek(SeekFrom::Start(0)).unwrap();
             result * 8
         }
 
         fn count_ones(&mut self) -> u64
         {
-            let original_seek = self.seek(SeekFrom::Current(0)).unwrap();
             let mut result = 0;
             let mut buf = [0u8; 1];
             self.seek(SeekFrom::Start(0)).unwrap();
             while self.read(&mut buf).unwrap() > 0 {
                 result += buf[0].count_ones() as u64
             }
-            self.seek(SeekFrom::Start(original_seek)).unwrap();
+            self.seek(SeekFrom::Start(0)).unwrap();
             result
         }
     }
@@ -210,6 +206,7 @@ pub mod bit_vec
             buf[0] |= other_byte;
             self.seek(SeekFrom::Start(seek)).unwrap();
             self.write_all(&buf).unwrap();
+            self.seek(SeekFrom::Start(0)).unwrap();
             (buf[0].count_ones() - original_ones) as u64
         }
 
@@ -225,6 +222,7 @@ pub mod bit_vec
             assert!(new_len % 8 == 0);
             self.seek(SeekFrom::Start(0)).unwrap();
             io::copy(&mut io::repeat(0).take(new_len / 8), &mut self).unwrap();
+            self.seek(SeekFrom::Start(0)).unwrap();
             self
         }
 
@@ -234,7 +232,7 @@ pub mod bit_vec
         {
             let mut result = 0;
             (0u64..)
-                .zip(other.bytes().map(|a| a.unwrap()))
+                .zip(io::BufReader::new(other).bytes().map(|a| a.unwrap()))
                 .for_each(|(i, w)| result += self.union_byte(i, w));
             result
         }
@@ -243,9 +241,7 @@ pub mod bit_vec
 
 pub mod bloom_filter
 {
-    use super::*;
-
-    use bit_vec::{BitVec, BitVecMem, BitVecMut};
+    use super::bit_vec::{BitVec, BitVecMem, BitVecMut};
     pub use config::BloomFilterConfig;
     use siphasher::sip::SipHasher13;
     use std::hash::{Hash, Hasher};
@@ -478,7 +474,7 @@ pub mod bloom_filter
         {
             assert!(other.k_num == self.k_num);
             assert!(other.bitmap_bits == self.bitmap_bits);
-            self.bitmap.union(io::BufReader::new(other.bitmap))
+            self.bitmap.union(other.bitmap)
         }
     }
 
@@ -515,7 +511,6 @@ pub mod bloom_filter
         /// Return the bitmap
         pub fn get_bitmap(&mut self) -> &mut H
         {
-            self.bitmap.seek(SeekFrom::Start(0)).unwrap();
             &mut self.bitmap
         }
 
@@ -544,11 +539,11 @@ pub mod bloom_filter
             ]
         }
 
-        pub fn to_mem(mut self) -> io::Result<Bloom<BitVecMem>>
+        pub fn to_mem(mut self) -> Bloom<BitVecMem>
         {
             let mut holder = vec![];
-            self.bitmap.read_to_end(&mut holder)?;
-            Ok(Bloom::from_bitmap_k_num(BitVecMem::new(holder), self.k_num))
+            self.bitmap.read_to_end(&mut holder).unwrap();
+            Bloom::from_bitmap_k_num(BitVecMem::new(holder), self.k_num)
         }
 
         pub fn bf_config(&self) -> BloomFilterConfig

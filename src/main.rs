@@ -158,7 +158,7 @@ fn main() -> io::Result<()>
             base_filter,
             filter_path,
         } => read_filter(base_filter, None)
-            .and_then(|(filter, _)| fill_filter_with_pwd(filter.to_mem()?, |_, _| Ok(())))
+            .and_then(|(filter, _)| fill_filter_with_pwd(filter.to_mem(), |_, _| Ok(())))
             .and_then(|filter| write_filter(filter_path, filter)),
         Opt::AddInPlace { filter_path } => {
             let mut rw_config = OpenOptions::new();
@@ -201,7 +201,7 @@ fn filter_union(input_paths: &Vec<PathBuf>) -> io::Result<BloomMem>
             Ok((new_filter, new_filter_config)) => match &mut result {
                 None => {
                     println!("Use file {:?} as baseline", &path);
-                    result = Some((new_filter.to_mem()?, new_filter_config.bf_config))
+                    result = Some((new_filter.to_mem(), new_filter_config.bf_config))
                 }
                 Some((filter, bf_config)) => {
                     if new_filter_config.bf_config == *bf_config {
