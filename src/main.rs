@@ -1,4 +1,4 @@
-use std::io::{self, BufRead, Read};
+use std::io::{self, BufRead};
 use std::{
     fs::{File, OpenOptions},
     path::PathBuf,
@@ -288,12 +288,12 @@ where
     filter.check(&normalize_string(pwd))
 }
 
-fn write_filter<T>(dst_filename: &PathBuf, mut filter: Bloom<T>) -> io::Result<()>
+fn write_filter<T>(dst_filename: &PathBuf, filter: Bloom<T>) -> io::Result<()>
 where
-    T: Read + BitVec,
+    T: BitVec,
 {
     let bf_config = filter.bf_config();
-    let mut bitmap = filter.get_bitmap();
+    let mut bitmap = filter.to_bitmap().to_reader();
     let config = AppConfig {
         bf_config,
         version: env!("CARGO_PKG_VERSION").to_string(),
