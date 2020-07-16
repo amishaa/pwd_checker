@@ -125,6 +125,27 @@ pub mod stream_io
             self.f.flush()
         }
     }
+
+    #[cfg(test)]
+    mod tests
+    {
+        use super::*;
+        use io::Cursor;
+        use std::slice;
+
+        #[test]
+        fn offset_stream_read() -> io::Result<()>
+        {
+            let mut byte = 0;
+            let mut stream = OffsetStream::new(Cursor::new([0, 0, 0, 1]), 2)?;
+            assert!(stream.read(slice::from_mut(&mut byte))? == 1);
+            assert!(byte == 0);
+            assert!(stream.read(slice::from_mut(&mut byte))? == 1);
+            assert!(byte == 1);
+            assert!(stream.read(slice::from_mut(&mut byte))? == 0);
+            Ok(())
+        }
+    }
 }
 
 pub mod bit_vec
