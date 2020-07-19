@@ -59,7 +59,7 @@ pub mod stream_io
         {
             let seek = self.f.seek(SeekFrom::Current(0))?;
             self.f.seek(SeekFrom::Start(0))?;
-            assert!(buf.len() > u16::MAX as usize);
+            assert!(buf.len() <= u16::MAX as usize);
             let mut buf_ext = (buf.len() as u16).to_be_bytes().to_vec();
             buf_ext.extend(buf);
             if buf_ext.len() as u64 >= self.offset {

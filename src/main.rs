@@ -293,11 +293,13 @@ where
     T: BitVec,
 {
     let bf_config = filter.bf_config();
-    let mut bitmap = filter.to_bitmap().to_reader();
+    let mut bitmap = filter.to_bitmap();
+    let ones = bitmap.count_ones();
+    let mut bitmap = bitmap.to_reader();
     let config = AppConfig {
         bf_config,
         version: env!("CARGO_PKG_VERSION").to_string(),
-        ones: bitmap.count_ones(),
+        ones,
     };
     let encoded_config = bincode::serialize(&config).unwrap();
     let mut dst_stream = OffsetStream::new(File::create(dst_filename)?, METADATA_OFFSET)?;
