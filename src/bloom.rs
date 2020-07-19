@@ -154,8 +154,6 @@ pub mod bit_vec
 
     use std::io::{self, Read, Seek, SeekFrom, Write};
 
-    pub type BitVecMem = io::Cursor<Vec<u8>>;
-
     pub trait BitVec
     {
         type Underlying: Read + Seek;
@@ -166,6 +164,7 @@ pub mod bit_vec
         fn len_bits(&mut self) -> u64;
         fn count_ones(&mut self) -> u64;
         fn to_reader(self) -> Self::Underlying;
+        fn get_reader(&mut self) -> &mut Self::Underlying;
     }
 
     pub trait BitVecMut: BitVec
@@ -180,12 +179,27 @@ pub mod bit_vec
             H: BitVec;
     }
 
+    pub struct BitVecHolder<F>
+    {
+        reader: F,
+    }
+
+    pub type BitVecMem = BitVecHolder<io::Cursor<Vec<u8>>>;
+
+    impl BitVecMem
+    {
+        pub fn create_from_vec(vec: Vec<u8>) -> Self
+        {
+            Self::new(io::Cursor::new(vec))
+        }
+    }
+
     fn get_block_offset(index: u64) -> (u64, usize)
     {
         ((index / 8), (7 - (index % 8)) as usize)
     }
 
-    impl<F> BitVec for F
+    impl<F> BitVec for BitVecHolder<F>
     where
         F: Read + Seek,
     {
@@ -193,7 +207,7 @@ pub mod bit_vec
 
         fn new(reader: Self::Underlying) -> Self
         {
-            reader
+            BitVecHolder { reader }
         }
 
         fn get(&mut self, index: u64) -> Option<bool>
@@ -204,14 +218,14 @@ pub mod bit_vec
             let (w, b) = get_block_offset(index);
 
             let mut buf = [0u8; 1];
-            self.seek(SeekFrom::Start(w)).unwrap();
-            self.read(&mut buf).unwrap();
+            self.reader.seek(SeekFrom::Start(w)).unwrap();
+            self.reader.read(&mut buf).unwrap();
             Some(buf[0] & (1 << b) != 0)
         }
 
         fn len_bits(&mut self) -> u64
         {
-            let result = self.seek(SeekFrom::End(0)).unwrap();
+            let result = self.reader.seek(SeekFrom::End(0)).unwrap();
             result * 8
         }
 
@@ -219,7 +233,7 @@ pub mod bit_vec
         {
             let mut result = 0;
             let mut buf = [0u8; 1];
-            while self.read(&mut buf).unwrap() > 0 {
+            while self.reader.read(&mut buf).unwrap() > 0 {
                 result += buf[0].count_ones() as u64
             }
             result
@@ -227,12 +241,17 @@ pub mod bit_vec
 
         fn to_reader(mut self) -> Self::Underlying
         {
-            self.seek(SeekFrom::Start(0)).unwrap();
-            self
+            self.reader.seek(SeekFrom::Start(0)).unwrap();
+            self.reader
+        }
+
+        fn get_reader(&mut self) -> &mut Self::Underlying
+        {
+            &mut self.reader
         }
     }
 
-    impl<F> BitVecMut for F
+    impl<F> BitVecMut for BitVecHolder<F>
     where
         F: Read + Write + Seek,
     {
@@ -241,12 +260,12 @@ pub mod bit_vec
         fn union_byte(&mut self, seek: u64, other_byte: u8) -> u64
         {
             let mut buf = [0u8; 1];
-            self.seek(SeekFrom::Start(seek)).unwrap();
-            assert!(self.read(&mut buf).unwrap() == 1);
+            self.reader.seek(SeekFrom::Start(seek)).unwrap();
+            assert!(self.reader.read(&mut buf).unwrap() == 1);
             let original_ones = buf[0].count_ones();
             buf[0] |= other_byte;
-            self.seek(SeekFrom::Start(seek)).unwrap();
-            self.write_all(&buf).unwrap();
+            self.reader.seek(SeekFrom::Start(seek)).unwrap();
+            self.reader.write_all(&buf).unwrap();
             (buf[0].count_ones() - original_ones) as u64
         }
 
@@ -260,8 +279,8 @@ pub mod bit_vec
         {
             assert!(new_len > self.len_bits());
             assert!(new_len % 8 == 0);
-            self.seek(SeekFrom::Start(0)).unwrap();
-            io::copy(&mut io::repeat(0).take(new_len / 8), &mut self).unwrap();
+            self.reader.seek(SeekFrom::Start(0)).unwrap();
+            io::copy(&mut io::repeat(0).take(new_len / 8), &mut self.reader).unwrap();
             self
         }
 
@@ -614,7 +633,7 @@ pub mod bloom_filter
         {
             let mut holder = vec![];
             self.bitmap.to_reader().read_to_end(&mut holder).unwrap();
-            Bloom::from_bitmap_k_num(BitVecMem::new(holder), self.k_num)
+            Bloom::from_bitmap_k_num(BitVecMem::create_from_vec(holder), self.k_num)
         }
 
         pub fn bf_config(&self) -> BloomFilterConfig

@@ -7,7 +7,7 @@ use structopt::StructOpt;
 
 mod bloom;
 use bloom::{
-    bit_vec::{BitVec, BitVecMem},
+    bit_vec::{BitVec, BitVecHolder, BitVecMem},
     bloom_filter::{Bloom, BloomFilterConfig as BFConfig},
     stream_io::{MetadataHolder, MetadataHolderMut, OffsetStream},
 };
@@ -151,9 +151,12 @@ fn main() -> io::Result<()>
             filter_path,
             nfo,
             dry_run: false,
-        } => Ok(BloomMem::new(&nfo.bloom_config(), BitVecMem::new(vec![])))
-            .and_then(|filter| fill_filter_with_pwd(filter, |_, _| Ok(())))
-            .and_then(|filter| write_filter(filter_path, filter)),
+        } => Ok(BloomMem::new(
+            &nfo.bloom_config(),
+            BitVecMem::create_from_vec(vec![]),
+        ))
+        .and_then(|filter| fill_filter_with_pwd(filter, |_, _| Ok(())))
+        .and_then(|filter| write_filter(filter_path, filter)),
         Opt::Create {
             nfo,
             filter_path: _,
@@ -169,9 +172,11 @@ fn main() -> io::Result<()>
             let mut rw_config = OpenOptions::new();
             rw_config.read(true).write(true);
             let (filter, mut metadata) = read_filter(filter_path, Some(rw_config))?;
-            let update_metadata = |holder: &mut OffsetStream<File>, new_ones| {
+            let update_metadata = |holder: &mut BitVecHolder<OffsetStream<File>>, new_ones| {
                 metadata.ones += new_ones;
-                holder.write_metadata(&bincode::serialize(&metadata).unwrap())
+                holder
+                    .get_reader()
+                    .write_metadata(&bincode::serialize(&metadata).unwrap())
             };
             fill_filter_with_pwd(filter, update_metadata).map(|_| ())
         }
@@ -239,7 +244,7 @@ where
 fn read_filter(
     filter_filename: &PathBuf,
     open_option: Option<OpenOptions>,
-) -> io::Result<(Bloom<OffsetStream<File>>, AppConfig)>
+) -> io::Result<(Bloom<BitVecHolder<OffsetStream<File>>>, AppConfig)>
 {
     let mut r_config = OpenOptions::new();
     r_config.read(true);
@@ -252,6 +257,7 @@ fn read_filter(
         config.version == env!("CARGO_PKG_VERSION"),
         "application version in metadata does not match application version",
     )?;
+    let mut filter_holder = BitVecHolder::new(filter_holder);
     assert_data_error(
         config.bf_config.len_bits() == filter_holder.len_bits(),
         "length in metadata does not match file lenght",
