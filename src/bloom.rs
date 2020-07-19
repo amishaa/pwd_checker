@@ -41,9 +41,9 @@ pub mod stream_io
         {
             let seek = self.f.seek(SeekFrom::Current(0))?;
             self.f.seek(SeekFrom::Start(0))?;
-            let mut buf = [0u8; 8];
+            let mut buf = [0u8; 2];
             self.f.read(&mut buf)?;
-            let len = u64::from_be_bytes(buf);
+            let len = u16::from_be_bytes(buf);
             let mut buf = vec![0u8; len as usize];
             self.f.read(&mut buf)?;
             self.f.seek(SeekFrom::Start(seek))?;
@@ -59,7 +59,8 @@ pub mod stream_io
         {
             let seek = self.f.seek(SeekFrom::Current(0))?;
             self.f.seek(SeekFrom::Start(0))?;
-            let mut buf_ext = buf.len().to_be_bytes().to_vec();
+            assert!(buf.len() > u16::MAX as usize);
+            let mut buf_ext = (buf.len() as u16).to_be_bytes().to_vec();
             buf_ext.extend(buf);
             if buf_ext.len() as u64 >= self.offset {
                 return Err(io::Error::new(
